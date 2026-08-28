@@ -4,6 +4,7 @@ const HOST = (process.env.GMGN_OPENAPI_HOST || "https://openapi.gmgn.ai").replac
 export const SIGNAL_CHAINS: Chain[] = ["sol", "bsc", "robinhood"];
 export const MIN_MARKET_CAP = 1_000_000;
 const SIGNAL_DISCOVERY_MIN_MARKET_CAP = 100_000;
+const SIGNAL_DISCOVERY_MAX_MARKET_CAP = 100_000_000;
 export const SIGNAL_LABELS: Record<number, string> = {
   1: "K线异动",
   6: "价格拉升",
@@ -27,6 +28,13 @@ const SIGNAL_NAME_TO_ID: Record<string, number> = {
   kol_buy: 20,
 };
 const TRACKED_SIGNAL_TYPES = new Set(Object.keys(SIGNAL_LABELS).map(Number));
+const FILTERABLE_SIGNAL_TYPES = [1, 6, 7, 8, 12, 20];
+
+export type SignalFetchDiagnostic = {
+  rawRows: number;
+  parsedRows: number;
+  rawTypeCounts: Record<string, number>;
+};
 
 function apiKey() {
   const key = (process.env.GMGN_API_KEY || "").trim();
@@ -101,32 +109,41 @@ function parseSignalType(value: unknown) {
   return parsed >= 1 && parsed <= 21 ? parsed : 1;
 }
 
-export async function fetchSignals(chain: Chain): Promise<Signal[]> {
+export async function fetchSignalsDetailed(chain: Chain): Promise<{ signals: Signal[]; diagnostic: SignalFetchDiagnostic }> {
+  const common = {
+    mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP,
+    mc_max: SIGNAL_DISCOVERY_MAX_MARKET_CAP,
+  };
   const payload = await gmgnRequest("/v1/market/token_signal", {
     method: "POST",
     body: {
       chain,
+      // Match the shape proven in Newsalert production: all API-filterable signal
+      // types in one group, plus one unfiltered group for 14/15/16.
       groups: [
-        // Discovery is deliberately wider than the $1M listing gate. A token can
-        // receive Smart/KOL flow below $1M and cross the hard gate afterwards.
-        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP, signal_type: [12, 20] },
-        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP, signal_type: [1, 6, 7, 8] },
-        // 14/15/16 cannot be explicitly included in GMGN filters; collect them from an unfiltered group.
-        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP },
+        { ...common, signal_type: FILTERABLE_SIGNAL_TYPES },
+        { ...common },
       ],
     },
   });
+
+  const rawRows = rowsFrom(payload, ["list", "items", "signals"]);
+  const rawTypeCounts: Record<string, number> = {};
   const result = new Map<string, Signal>();
-  for (const row of rowsFrom(payload, ["list", "items", "signals"])) {
-    const signalType = parseSignalType(pick(row, "signal_type", "type"));
+
+  for (const row of rawRows) {
+    const rawType = pick(row, "signal_type", "type");
+    const rawTypeKey = String(rawType ?? "missing");
+    rawTypeCounts[rawTypeKey] = (rawTypeCounts[rawTypeKey] || 0) + 1;
+    const signalType = parseSignalType(rawType);
     if (!TRACKED_SIGNAL_TYPES.has(signalType)) continue;
     const address = String(pick(row, "token_address", "address", "contract_address") || "").trim();
     if (!address) continue;
     const triggerEpoch = epoch(pick(row, "trigger_at", "timestamp", "created_at"));
     const upstream = String(pick(row, "id", "signal_id") || `${address}:${signalType}:${Math.floor(triggerEpoch)}`);
     const marketCap = num(pick(row, "market_cap", "usd_market_cap", "marketcap", "mc"));
-    // Do not apply the $1M product gate here. Signal market cap may describe the
-    // trigger moment; current rank data is preferred later when building the feed.
+    // The $1M product gate is intentionally not applied here. Current rank data is
+    // merged in scoring before deciding whether a project is eligible to list.
     result.set(`${chain}:${upstream}`, {
       id: `${chain}:${upstream}`,
       chain,
@@ -148,7 +165,16 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
       washTrading: Boolean(pick(row, "is_wash_trading")),
     });
   }
-  return [...result.values()];
+
+  const signals = [...result.values()];
+  return {
+    signals,
+    diagnostic: { rawRows: rawRows.length, parsedRows: signals.length, rawTypeCounts },
+  };
+}
+
+export async function fetchSignals(chain: Chain): Promise<Signal[]> {
+  return (await fetchSignalsDetailed(chain)).signals;
 }
 
 export async function fetchRank(chain: Chain): Promise<RankToken[]> {
