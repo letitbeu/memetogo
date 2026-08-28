@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { fetchRank, fetchSignalsDetailed, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchIdentityBuySignals } from "@/lib/gmgn_identity";
 import type { Chain, RankToken, Signal, Trader } from "@/lib/types";
 
 export type ChainDiagnostics = {
@@ -8,6 +9,11 @@ export type ChainDiagnostics = {
   signalRawRows: number;
   signalParsedRows: number;
   signalTypeCounts: Record<string, number>;
+  smartTradeRows: number;
+  smartBuyRows: number;
+  kolTradeRows: number;
+  kolBuyRows: number;
+  identityWarnings: string[];
   rankCount: number;
   errors: string[];
 };
@@ -26,28 +32,50 @@ async function collectFresh(): Promise<IndependentSnapshot> {
   const ranks: RankToken[] = [];
   const diagnostics: ChainDiagnostics[] = [];
 
-  // Intentionally sequential. The old implementation fired six GMGN requests at once
-  // and hit burst-rate limits. MemeToGo now uses its own key, but still paces requests.
+  // Sequential per chain to protect the dedicated MemeToGo GMGN key from burst limits.
   for (const chain of SIGNAL_CHAINS) {
     const errors: string[] = [];
-    let chainSignals: Signal[] = [];
+    const mergedSignals = new Map<string, Signal>();
     let chainRanks: RankToken[] = [];
     let signalRawRows = 0;
     let signalParsedRows = 0;
     let signalTypeCounts: Record<string, number> = {};
+    let smartTradeRows = 0;
+    let smartBuyRows = 0;
+    let kolTradeRows = 0;
+    let kolBuyRows = 0;
+    let identityWarnings: string[] = [];
 
+    // Primary identity-flow source: actual GMGN Smart Money/KOL trade feeds.
+    // These are API-key-only public platform-tagged wallet streams.
+    try {
+      const identityResult = await fetchIdentityBuySignals(chain);
+      for (const signal of identityResult.signals) mergedSignals.set(signal.id, signal);
+      smartTradeRows = identityResult.diagnostic.smartRawRows;
+      smartBuyRows = identityResult.diagnostic.smartBuyRows;
+      kolTradeRows = identityResult.diagnostic.kolRawRows;
+      kolBuyRows = identityResult.diagnostic.kolBuyRows;
+      identityWarnings = identityResult.diagnostic.warnings;
+    } catch (error) {
+      identityWarnings.push(`Identity: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    await pause(350);
+
+    // Secondary/context source: market token_signal. It supplies price/ATH/large-buy
+    // P0 context when available, but an empty token_signal response cannot disable
+    // the Smart/KOL hard gate because identity BUY trades are collected above.
     try {
       const signalResult = await fetchSignalsDetailed(chain);
-      chainSignals = signalResult.signals;
+      for (const signal of signalResult.signals) mergedSignals.set(signal.id, signal);
       signalRawRows = signalResult.diagnostic.rawRows;
       signalParsedRows = signalResult.diagnostic.parsedRows;
       signalTypeCounts = signalResult.diagnostic.rawTypeCounts;
-      signals.push(...chainSignals);
     } catch (error) {
-      errors.push(`Signal: ${error instanceof Error ? error.message : String(error)}`);
+      errors.push(`Signal context: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    await pause(400);
+    await pause(350);
 
     try {
       chainRanks = await fetchRank(chain);
@@ -56,17 +84,25 @@ async function collectFresh(): Promise<IndependentSnapshot> {
       errors.push(`Rank: ${error instanceof Error ? error.message : String(error)}`);
     }
 
+    const chainSignals = [...mergedSignals.values()].sort((a, b) => b.triggerEpoch - a.triggerEpoch);
+    signals.push(...chainSignals);
+
     diagnostics.push({
       chain,
       signalCount: chainSignals.length,
       signalRawRows,
       signalParsedRows,
       signalTypeCounts,
+      smartTradeRows,
+      smartBuyRows,
+      kolTradeRows,
+      kolBuyRows,
+      identityWarnings,
       rankCount: chainRanks.length,
       errors,
     });
 
-    await pause(400);
+    await pause(350);
   }
 
   return {
@@ -79,7 +115,7 @@ async function collectFresh(): Promise<IndependentSnapshot> {
 
 const cachedSnapshot = unstable_cache(
   collectFresh,
-  ["memetogo-independent-gmgn-snapshot-v2"],
+  ["memetogo-independent-gmgn-snapshot-v3"],
   { revalidate: 60 },
 );
 
