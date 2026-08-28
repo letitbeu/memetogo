@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MIN_MARKET_CAP, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchIndependentSnapshot, fetchIndependentTopTraders, tokenContext } from "@/lib/gmgn_independent";
 import { researchCulture } from "@/lib/culture";
 import { fetchPublicKline, fetchPublicTokenMarket } from "@/lib/marketdata";
-import { fetchNewsalertSnapshot, tokenContext } from "@/lib/newsalert";
 import { evaluateP0Plus } from "@/lib/wealth";
 import type { Chain, KlineCandle, Trader } from "@/lib/types";
 
@@ -25,13 +25,18 @@ function xUrl(value: string) {
 export async function GET(request: NextRequest) {
   const chain = String(request.nextUrl.searchParams.get("chain") || "").toLowerCase() as Chain;
   const address = String(request.nextUrl.searchParams.get("address") || "").trim();
-  if (!SIGNAL_CHAINS.includes(chain) || !validAddress(chain, address)) return NextResponse.json({ error: "chain/address 参数无效" }, { status: 400 });
+  if (!SIGNAL_CHAINS.includes(chain) || !validAddress(chain, address)) {
+    return NextResponse.json({ error: "chain/address 参数无效" }, { status: 400 });
+  }
 
   try {
-    const snapshot = await fetchNewsalertSnapshot();
+    const snapshot = await fetchIndependentSnapshot();
     const { rank, signals } = tokenContext(snapshot, chain, address);
     const newest = signals[0] || null;
     const diagnostics: string[] = [];
+
+    const chainDiagnostic = snapshot.diagnostics.find(row => row.chain === chain);
+    if (chainDiagnostic?.errors.length) diagnostics.push(...chainDiagnostic.errors.map(error => `GMGN ${error}`));
 
     let market = null;
     try {
@@ -76,6 +81,13 @@ export async function GET(request: NextRequest) {
       volume24h: market?.volume24h || 0,
     };
 
+    let traders: Trader[] = [];
+    try {
+      traders = await fetchIndependentTopTraders(chain, address);
+    } catch (error) {
+      diagnostics.push(`GMGN Top Traders: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
     const culture = await researchCulture(info);
     const riskToken = {
       marketCap: info.marketCap,
@@ -87,7 +99,6 @@ export async function GET(request: NextRequest) {
       bundlerRate: info.bundlerRate,
       insiderRate: info.insiderRate,
     };
-    const traders: Trader[] = [];
     const wealth = evaluateP0Plus(riskToken, traders);
 
     return NextResponse.json({
@@ -95,22 +106,17 @@ export async function GET(request: NextRequest) {
       info,
       rank,
       candles,
-      traders,
+      traders: traders.slice(0, 12),
       signals: signals.slice(0, 24),
       smartBuySignals: signals.filter(signal => signal.signalType === 12).length,
       kolBuySignals: signals.filter(signal => signal.signalType === 20).length,
-      p0Plus: {
-        ...wealth,
-        reason: wealth.confirmed
-          ? wealth.reason
-          : "P0+ Top-Trader财富效应暂不在详情请求中直连GMGN；避免与Newsalert采集器争抢同一API Key配额。",
-      },
+      p0Plus: wealth,
       culture,
       dataSource: {
-        identityFlow: "GMGN via Newsalert shared collector",
+        identityFlow: "GMGN via MemeToGo independent collector",
         market: "DEX Screener",
         kline: "GeckoTerminal 5m OHLCV",
-        topTraders: "paused_shared_key_protection",
+        topTraders: "GMGN via MemeToGo key, 5m cached",
         minMarketCap: MIN_MARKET_CAP,
       },
       diagnostics,
