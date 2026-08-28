@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AlphaProject, HawkesMetrics, KlineCandle } from "@/lib/types";
+import type { AlphaProject, KlineCandle } from "@/lib/types";
 import ContractExplorer from "./contract-explorer";
-import styles from "./hawkes.module.css";
+import HawkesPanel from "./hawkes-panel";
 
 const STORE_KEY = "memetogo:rolling-feed:v2";
 const MAX_HISTORY = 120;
@@ -63,143 +63,6 @@ function CandleChart({ candles }: { candles: KlineCandle[] }) {
 
 function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: string }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
-}
-
-const regimeLabels: Record<HawkesMetrics["regime"], string> = {
-  insufficient: "样本不足",
-  dormant: "未启动",
-  upstream_ignition: "上游点火",
-  cascade: "级联形成",
-  overheated: "传播过热",
-};
-
-const confidenceLabels: Record<HawkesMetrics["confidence"], string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
-};
-
-function hawkesOutlook(project: AlphaProject) {
-  const h = project.hawkes;
-  if (!h || h.eventCount < 2) {
-    return {
-      bias: "暂不判断",
-      tone: "neutral",
-      structure: "身份资金事件样本不足，当前无法稳定分解外生流入与内生传播。",
-      outlook: "后市方向暂不应由 Hawkes 模型决定；等待更多 Smart Money / KOL BUY 事件进入窗口后再观察。",
-      confirm: "至少形成 2 个以上时序事件，最好同时包含 SM 与 KOL，再观察传播矩阵是否稳定。",
-      invalidation: "当前无有效 Hawkes 结构，因此不存在模型意义上的失效条件。",
-    };
-  }
-
-  const rho = h.reproductionNumber;
-  const endo = h.endogenousRatio;
-  const smLead = h.smartToKol > h.kolToSmart * 1.2;
-  const kolLead = h.kolToSmart > h.smartToKol * 1.2;
-  const priceExtended = project.change5m >= 20;
-  const weakLiquidity = project.liquidity > 0 && project.liquidity < 100_000;
-
-  if (h.regime === "overheated") {
-    return {
-      bias: "高波动 · 谨慎追涨",
-      tone: "risk",
-      structure: `ρ(A)=${rho.toFixed(2)}、内生传播 ${(endo * 100).toFixed(0)}%，说明事件已经高度依赖前序事件自我繁殖，系统接近或进入临界传播。`,
-      outlook: `短线动量仍可能延续，但这已经不是最优早期 Alpha 区间。${priceExtended ? "5分钟价格已经明显加速，传播与价格同时过热，追高后的回撤风险更高。" : "价格尚未完全垂直化，但资金传播拥挤度已经很高，后续波动会显著放大。"}`,
-      confirm: "更健康的续涨需要 ρ 从极端位置回落但价格、流动性和身份资金仍保持抬升，即由‘爆炸式传播’转成‘可持续趋势’。",
-      invalidation: "若身份资金事件骤停、内生率快速回落，同时价格跌破最近传播启动区，则级联大概率进入衰减。",
-    };
-  }
-
-  if (h.regime === "upstream_ignition") {
-    return {
-      bias: priceExtended ? "偏多 · 但已开始兑现" : "偏多 · 早期传播",
-      tone: "bull",
-      structure: `SM→KOL=${h.smartToKol.toFixed(2)} 高于 KOL→SM=${h.kolToSmart.toFixed(2)}，说明传播方向更接近“聪明钱先进入 → KOL 后接力”，属于理想的上游点火结构。`,
-      outlook: `${priceExtended ? "资金传播结构仍偏正面，但价格已快速反应，新增赔率低于信号刚启动时。" : "价格尚未大幅兑现时，这类结构最符合早期 Alpha：资金关系先变化、价格随后才可能完成扩散。"}${weakLiquidity ? "不过当前流动性偏薄，价格冲击可能放大 Hawkes 信号，需要防止把机械拉盘误判成信息扩散。" : ""}`,
-      confirm: "SM→KOL 继续抬升、ρ 向 0.6–0.9 区间上行，同时 KOL 买入数量和成交量扩张，但价格仍未出现单根垂直拉升，是最强确认。",
-      invalidation: "若 SM→KOL 快速回落、KOL→SM 反超，或 ρ 回落到约 0.3 以下，说明上游传播没有成功转化成持续级联。",
-    };
-  }
-
-  if (h.regime === "cascade") {
-    if (smLead) {
-      return {
-        bias: priceExtended ? "偏多 · 传播中段" : "偏多 · 级联扩散",
-        tone: "bull",
-        structure: `ρ(A)=${rho.toFixed(2)}、内生率 ${(endo * 100).toFixed(0)}%，传播已形成自激；同时 SM→KOL 仍强于反向路径，资金链条仍偏上游驱动。`,
-        outlook: `${priceExtended ? "趋势延续概率仍高于普通项目，但行情已经进入传播中段，最早期赔率已经下降。" : "级联已启动但价格尚未充分扩张，后续更值得观察 KOL 接力和成交扩张是否继续把身份资金传播到更广泛市场。"}`,
-        confirm: "ρ 维持在亚临界高位、内生率继续抬升，且 SM→KOL 不弱化，是延续级联的主要确认。",
-        invalidation: "ρ 与内生率同时下降、SM→KOL 转弱并伴随成交量衰减，说明传播链正在失去自我维持能力。",
-      };
-    }
-    if (kolLead) {
-      return {
-        bias: "中性偏谨慎 · KOL主导",
-        tone: "warn",
-        structure: `虽然 ρ(A)=${rho.toFixed(2)} 已显示级联，但 KOL→SM=${h.kolToSmart.toFixed(2)} 高于 SM→KOL=${h.smartToKol.toFixed(2)}，传播更像 KOL/市场热度领先、聪明钱随后参与。`,
-        outlook: "这类结构可以继续上涨，但‘早期信息优势’弱于 Smart Money 上游点火，更接近已经被市场发现后的扩散。若价格同时快速上涨，应降低追高权重。",
-        confirm: "若后续 SM→KOL 反超 KOL→SM，说明聪明钱开始重新取得传播上游位置，结构才会明显改善。",
-        invalidation: "若 KOL 自激继续升高而 SM 跟随减弱，同时价格加速，容易演化成情绪主导的后段行情。",
-      };
-    }
-    return {
-      bias: "中性偏多 · 双向自激",
-      tone: "neutral",
-      structure: `ρ(A)=${rho.toFixed(2)}、内生率 ${(endo * 100).toFixed(0)}%，SM 与 KOL 之间没有明显单向领先，属于双向互相强化的传播结构。`,
-      outlook: "行情已有持续性基础，但缺少明确的上游信息源，因此更像趋势确认而不是最早期 Alpha。需要结合价格是否已充分拉升判断赔率。",
-      confirm: "若 SM→KOL 开始持续高于反向路径，同时 ρ 继续上升但保持低于临界区，结构会进一步转强。",
-      invalidation: "双向激发同时下降、内生率回落，意味着传播网络开始解耦，趋势延续概率下降。",
-    };
-  }
-
-  return {
-    bias: "中性 · 尚未形成自激",
-    tone: "neutral",
-    structure: `ρ(A)=${rho.toFixed(2)}、内生率 ${(endo * 100).toFixed(0)}%，身份资金事件仍以外生、离散到达为主，尚未形成稳定的自我传播。`,
-    outlook: "当前有 Smart Money/KOL 买入并不等于形成 Alpha 级联。后市更依赖新的独立身份资金事件是否连续出现；在 Hawkes 结构转强前，不应仅凭单笔身份资金追涨。",
-    confirm: "ρ 上升到约 0.4 以上、内生率抬升，并出现明确 SM→KOL 或持续 SM→SM 自激，才说明资金结构开始真正变化。",
-    invalidation: "若后续仍只有零散事件、ρ 长期低位，则本轮身份资金更可能只是孤立交易，而非可传播 Alpha。",
-  };
-}
-
-function HawkesPanel({ project }: { project: AlphaProject }) {
-  const h = project.hawkes;
-  const view = hawkesOutlook(project);
-  if (!h) return <section><div className="section-title"><h3>Hawkes 传播结构</h3><span>等待模型数据</span></div><p className="muted">该项目尚未生成 Hawkes 数据。</p></section>;
-
-  return <section className={styles.section}>
-    <div className="section-title"><h3>Hawkes 传播结构</h3><span>Marked Multivariate · 2H窗口 · 15m核半衰期</span></div>
-    <div className={styles.statusRow}>
-      <span className={`${styles.regime} ${styles[view.tone]}`}>{regimeLabels[h.regime]}</span>
-      <span>后市倾向：<b>{view.bias}</b></span>
-      <span>置信度：<b>{confidenceLabels[h.confidence]}</b></span>
-      <span>样本：<b>{h.eventCount}</b>（SM {h.smartEvents} / KOL {h.kolEvents}）</span>
-      <span>金额Mark覆盖：<b>{(h.markCoverage * 100).toFixed(0)}%</b></span>
-    </div>
-
-    <div className={styles.cards}>
-      <div className={styles.card}><span>ρ(A) 传播再生产数</span><strong>{h.reproductionNumber.toFixed(2)}</strong><small>{h.reproductionNumber < .4 ? "传播弱" : h.reproductionNumber < .8 ? "自激增强" : h.reproductionNumber < .95 ? "接近临界" : "临界/过热"}</small></div>
-      <div className={styles.card}><span>内生传播占比</span><strong>{(h.endogenousRatio * 100).toFixed(0)}%</strong><small>被前序事件解释的比例</small></div>
-      <div className={`${styles.card} ${styles.smart}`}><span>SM → KOL</span><strong>{h.smartToKol.toFixed(2)}</strong><small>聪明钱对KOL的激发</small></div>
-      <div className={`${styles.card} ${styles.kol}`}><span>KOL → SM</span><strong>{h.kolToSmart.toFixed(2)}</strong><small>KOL对聪明钱的反向激发</small></div>
-    </div>
-
-    <div className={styles.matrixLine}>
-      <span>SM→SM <b>{h.smartToSmart.toFixed(2)}</b></span>
-      <span>KOL→KOL <b>{h.kolToKol.toFixed(2)}</b></span>
-      <span>方向优势 <b>{h.directionalEdge >= 0 ? "+" : ""}{h.directionalEdge.toFixed(2)}</b></span>
-      <span>ρ&lt;1 为亚临界；越接近 1，传播越容易自我维持</span>
-    </div>
-
-    <div className={styles.reading}>
-      <div><span>当前结构</span><p>{view.structure}</p></div>
-      <div className={styles.outlook}><span>行情后市判断</span><p>{view.outlook}</p></div>
-      <div><span>继续走强的确认条件</span><p>{view.confirm}</p></div>
-      <div><span>结构失效 / 风险信号</span><p>{view.invalidation}</p></div>
-    </div>
-
-    <p className={styles.note}>读法：ρ(A) 衡量整个身份资金网络的自激繁殖能力；SM→KOL 与 KOL→SM 判断传播方向；内生率判断当前交易有多少是由前序身份资金事件“带出来”的。该模块暂不参与 Alpha Score，先独立观察其对后续行情的解释力。</p>
-  </section>;
 }
 
 function ProjectRow({ project, selected, onClick }: { project: AlphaProject; selected: boolean; onClick: () => void }) {
