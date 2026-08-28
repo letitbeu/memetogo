@@ -8,7 +8,8 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
   const rankMap = new Map(ranks.map(row => [`${row.chain}:${row.address.toLowerCase()}`, row]));
   const grouped = new Map<string, Signal[]>();
   for (const signal of signals) {
-    if (signal.marketCap && signal.marketCap < MIN_MARKET_CAP) continue;
+    // Preserve identity-flow history even when the signal fired below $1M.
+    // The actual listing gate is evaluated after current rank data is merged.
     const key = `${signal.chain}:${signal.address.toLowerCase()}`;
     const list = grouped.get(key) || [];
     list.push(signal);
@@ -47,6 +48,7 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
       washTrading: latest.washTrading,
     };
     const marketCap = base.marketCap || latest.marketCap;
+    // This is the only $1M listing gate: prefer current 5m rank market cap when present.
     if (marketCap < MIN_MARKET_CAP) continue;
 
     const signalTypes = new Set(rows.map(row => row.signalType));
