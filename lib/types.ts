@@ -19,6 +19,9 @@ export type Signal = {
   top10Rate: number | null;
   rugRatio: number | null;
   washTrading: boolean;
+  maker?: string;
+  tradeUsd?: number;
+  identitySource?: "smartmoney_feed" | "kol_feed";
 };
 
 export type RankToken = {
@@ -46,6 +49,27 @@ export type RankToken = {
   launchpad?: string;
 };
 
+export type HawkesRegime = "insufficient" | "dormant" | "upstream_ignition" | "cascade" | "overheated";
+
+export type HawkesMetrics = {
+  version: "marked-bivariate-em-v1";
+  horizonMinutes: number;
+  kernelHalfLifeMinutes: number;
+  eventCount: number;
+  smartEvents: number;
+  kolEvents: number;
+  markCoverage: number;
+  reproductionNumber: number;
+  endogenousRatio: number;
+  smartToSmart: number;
+  smartToKol: number;
+  kolToSmart: number;
+  kolToKol: number;
+  directionalEdge: number;
+  regime: HawkesRegime;
+  confidence: "low" | "medium" | "high";
+};
+
 export type AlphaProject = RankToken & {
   key: string;
   smartBuySignals: number;
@@ -59,6 +83,7 @@ export type AlphaProject = RankToken & {
   legacyP0Reasons: string[];
   thesis: string[];
   risks: string[];
+  hawkes: HawkesMetrics;
 };
 
 export type KlineCandle = {
