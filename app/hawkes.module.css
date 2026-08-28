@@ -1,0 +1,28 @@
+.section{position:relative}
+.statusRow{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;color:#8e9aac;font-size:10px}
+.statusRow b{color:#dbe4ef;font-weight:700}
+.regime{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;border:1px solid #2b3545;background:#111821;font-weight:750;color:#c6d0dc}
+.bull{border-color:rgba(70,226,154,.35);background:rgba(70,226,154,.07);color:#72eeb0}
+.warn{border-color:rgba(255,200,87,.35);background:rgba(255,200,87,.07);color:#ffd572}
+.risk{border-color:rgba(255,104,118,.35);background:rgba(255,104,118,.07);color:#ff8f9a}
+.neutral{border-color:#2b3545;background:#111821;color:#b8c2cf}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.card{padding:13px 14px;border:1px solid #243042;background:linear-gradient(180deg,#0e151f,#0b1119);border-radius:11px;display:flex;flex-direction:column;min-width:0}
+.card span{font-size:9px;color:#8390a2}
+.card strong{font-size:22px;line-height:1;margin-top:8px;color:#edf3f9;letter-spacing:-.5px}
+.card small{font-size:8px;color:#657386;margin-top:6px;line-height:1.4}
+.smart{border-color:rgba(70,226,154,.28);background:linear-gradient(180deg,rgba(70,226,154,.055),rgba(11,17,25,.95))}
+.kol{border-color:rgba(181,140,255,.28);background:linear-gradient(180deg,rgba(181,140,255,.055),rgba(11,17,25,.95))}
+.matrixLine{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;padding:9px 11px;border:1px solid #1d2734;background:#0a1017;border-radius:8px;color:#7d899a;font-size:9px}
+.matrixLine b{color:#c7d1de;margin-left:4px}
+.reading{margin-top:12px;border:1px solid #263244;background:linear-gradient(180deg,rgba(18,25,35,.75),rgba(11,16,23,.95));border-radius:11px;overflow:hidden}
+.reading>div{display:grid;grid-template-columns:138px 1fr;gap:16px;padding:11px 13px;border-bottom:1px solid #1d2633}
+.reading>div:last-child{border-bottom:0}
+.reading span{color:#8391a4;font-size:9px;font-weight:700}
+.reading p{margin:0;color:#c1ccd9;font-size:10px;line-height:1.7}
+.outlook{background:linear-gradient(90deg,rgba(95,201,255,.055),rgba(181,140,255,.025))}
+.outlook span{color:#8ed9ff}
+.outlook p{color:#d9e5f0}
+.note{margin:10px 2px 0;color:#697789;font-size:9px;line-height:1.65}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.reading>div{grid-template-columns:1fr;gap:5px}}
+@media(max-width:520px){.cards{grid-template-columns:1fr}.statusRow{gap:7px}.matrixLine{gap:10px}.reading>div{padding:10px}}
