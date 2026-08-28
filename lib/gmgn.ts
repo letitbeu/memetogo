@@ -125,10 +125,8 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
     const triggerEpoch = epoch(pick(row, "trigger_at", "timestamp", "created_at"));
     const upstream = String(pick(row, "id", "signal_id") || `${address}:${signalType}:${Math.floor(triggerEpoch)}`);
     const marketCap = num(pick(row, "market_cap", "usd_market_cap", "marketcap", "mc"));
-    // The final product gate is current market cap >= $1M. Keep only rows that are
-    // already over the gate when GMGN provides current market cap; rank data is the
-    // fallback verifier when this field is absent.
-    if (marketCap && marketCap < MIN_MARKET_CAP) continue;
+    // Do not apply the $1M product gate here. Signal market cap may describe the
+    // trigger moment; current rank data is preferred later when building the feed.
     result.set(`${chain}:${upstream}`, {
       id: `${chain}:${upstream}`,
       chain,
