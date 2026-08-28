@@ -21,7 +21,7 @@ export async function GET() {
       source: {
         mode: "memetogo-independent-gmgn",
         collectorCapturedAt: snapshot.capturedAt,
-        refreshSeconds: 60,
+        refreshSeconds: 120,
         apiKeyScope: "memetogo-only",
       },
       hardGate: {
