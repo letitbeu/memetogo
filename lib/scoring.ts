@@ -4,6 +4,13 @@ import type { AlphaProject, RankToken, Signal } from "@/lib/types";
 
 const clamp = (n: number, min = 0, max = 100) => Math.min(max, Math.max(min, n));
 const riskHigh = (value: number | null, threshold: number) => value != null && value > threshold;
+const hawkesRegimeLabel = (regime: AlphaProject["hawkes"]["regime"]) => ({
+  insufficient: "样本不足",
+  dormant: "未启动",
+  upstream_ignition: "上游点火",
+  cascade: "级联形成",
+  overheated: "过热",
+}[regime]);
 
 export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpoch = Date.now() / 1000): AlphaProject[] {
   const rankMap = new Map(ranks.map(row => [`${row.chain}:${row.address.toLowerCase()}`, row]));
@@ -114,6 +121,11 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
     if (base.liquidity > 0 && base.liquidity < 100_000) { score -= 8; risks.push("流动性低于10万美元"); }
 
     const hawkes = estimateMarkedBivariateHawkes(rows, nowEpoch);
+    if (hawkes.eventCount >= 2) {
+      thesis.unshift(`Hawkes ρ ${hawkes.reproductionNumber.toFixed(2)} · ${hawkesRegimeLabel(hawkes.regime)} · 内生 ${(hawkes.endogenousRatio * 100).toFixed(0)}%`);
+      thesis.unshift(`Hawkes SM→KOL ${hawkes.smartToKol.toFixed(2)} / KOL→SM ${hawkes.kolToSmart.toFixed(2)}`);
+    }
+
     score = Math.round(clamp(score));
     const grade: AlphaProject["grade"] = score >= 85 ? "A+" : score >= 70 ? "A" : score >= 55 ? "B+" : "B";
     projects.push({
