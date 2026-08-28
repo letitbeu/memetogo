@@ -49,16 +49,19 @@ export type RankToken = {
   launchpad?: string;
 };
 
-export type HawkesRegime = "insufficient" | "dormant" | "upstream_ignition" | "cascade" | "overheated";
+export type HawkesRegime = "insufficient" | "seed" | "unilateral" | "dormant" | "upstream_ignition" | "cascade" | "overheated";
 
 export type HawkesMetrics = {
-  version: "marked-bivariate-em-v1";
+  version: "marked-bivariate-em-v2-adaptive";
   horizonMinutes: number;
   kernelHalfLifeMinutes: number;
   eventCount: number;
   smartEvents: number;
   kolEvents: number;
   markCoverage: number;
+  localEvidenceWeight: number;
+  expectedTriggered60m: number;
+  latestEventType: "smart" | "kol" | "none";
   reproductionNumber: number;
   endogenousRatio: number;
   smartToSmart: number;
