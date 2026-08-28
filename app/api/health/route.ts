@@ -10,7 +10,7 @@ export async function GET() {
     mode: "smart-kol-first",
     architecture: "memetogo-independent-gmgn-v1",
     gmgnKeyScope: "memetogo-only",
-    collectorRefreshSeconds: 60,
+    collectorRefreshSeconds: 120,
     minMarketCap: 1_000_000,
     commitSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
     vercelEnv: process.env.VERCEL_ENV || null,
