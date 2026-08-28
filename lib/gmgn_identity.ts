@@ -95,6 +95,7 @@ function tradeToSignal(chain: Chain, row: Record<string, any>, type: 12 | 20): S
   const transaction = String(row.transaction_hash || row.tx_hash || row.id || "").trim();
   const maker = String(row.maker || dict(row.maker_info).address || "").trim();
   const stableId = transaction || `${maker}:${address}:${Math.floor(triggerEpoch)}`;
+  const tradeUsd = num(value(row, "amount_usd", "usd_amount", "usd_value", "value_usd", "quote_amount_usd"));
   return {
     id: `${chain}:identity:${type}:${stableId}`,
     chain,
@@ -114,6 +115,9 @@ function tradeToSignal(chain: Chain, row: Record<string, any>, type: 12 | 20): S
     top10Rate: nullableNum(value(row, "top_10_holder_rate")),
     rugRatio: nullableNum(value(row, "rug_ratio")),
     washTrading: Boolean(value(row, "is_wash_trading")),
+    maker: maker || undefined,
+    tradeUsd: tradeUsd > 0 ? tradeUsd : undefined,
+    identitySource: type === 12 ? "smartmoney_feed" : "kol_feed",
   };
 }
 
