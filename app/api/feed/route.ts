@@ -16,6 +16,18 @@ export async function GET() {
   try {
     const snapshot = await fetchIndependentSnapshot();
     const projects = buildAlphaProjects(snapshot.signals, snapshot.ranks);
+    const identityEvents = snapshot.signals
+      .filter(signal => signal.signalType === 12 || signal.signalType === 20)
+      .map(signal => ({
+        id: signal.id,
+        chain: signal.chain,
+        address: signal.address,
+        signalType: signal.signalType,
+        triggerEpoch: signal.triggerEpoch,
+        tradeUsd: signal.tradeUsd || 0,
+        identitySource: signal.identitySource || null,
+      }));
+
     const payload = {
       generatedAt: new Date().toISOString(),
       source: {
@@ -30,6 +42,7 @@ export async function GET() {
         enabled: true,
       },
       projects,
+      identityEvents,
       diagnostics: snapshot.diagnostics,
     };
 
@@ -39,7 +52,7 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error), projects: [] },
+      { error: error instanceof Error ? error.message : String(error), projects: [], identityEvents: [] },
       { status: 500 },
     );
   }
