@@ -56,7 +56,7 @@ export function estimateMarkedBivariateHawkes(signals: Signal[], nowEpoch = Date
   );
 
   const marks = normalizeMarks(identity.map(s => s.tradeUsd && s.tradeUsd > 0 ? s.tradeUsd : null));
-  const events: Event[] = identity.map((s, i) => ({
+  const events: Event[] = identity.map((s, i): Event => ({
     t: s.triggerEpoch,
     type: s.signalType === 12 ? 0 : 1,
     mark: marks[i],
