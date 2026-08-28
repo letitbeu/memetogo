@@ -14,6 +14,17 @@ export const SIGNAL_LABELS: Record<number, string> = {
   16: "多笔巨额买入",
   20: "KOL买入",
 };
+const SIGNAL_NAME_TO_ID: Record<string, number> = {
+  unpaid: 1,
+  price_up: 6,
+  ath: 7,
+  key_mc: 8,
+  smart_degen_buy: 12,
+  large_amount_buy: 14,
+  multi_buy: 15,
+  multi_large_buy: 16,
+  kol_buy: 20,
+};
 const TRACKED_SIGNAL_TYPES = new Set(Object.keys(SIGNAL_LABELS).map(Number));
 
 function apiKey() {
@@ -34,7 +45,7 @@ async function gmgnRequest(path: string, options: { method?: "GET" | "POST"; que
       "X-APIKEY": apiKey(),
       Accept: "application/json",
       "Content-Type": "application/json",
-      "User-Agent": "MemeToGo/0.1 Alpha-Radar",
+      "User-Agent": "MemeToGo/0.2 Alpha-Radar",
     },
     body: options.body == null ? undefined : JSON.stringify(options.body),
     signal: AbortSignal.timeout(12_000),
@@ -80,6 +91,14 @@ function rowsFrom(payload: unknown, keys: string[]): any[] {
   }
   return [];
 }
+function parseSignalType(value: unknown) {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (SIGNAL_NAME_TO_ID[normalized]) return SIGNAL_NAME_TO_ID[normalized];
+  }
+  const parsed = int(value, 1);
+  return parsed >= 1 && parsed <= 21 ? parsed : 1;
+}
 
 export async function fetchSignals(chain: Chain): Promise<Signal[]> {
   const payload = await gmgnRequest("/v1/market/token_signal", {
@@ -87,6 +106,8 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
     body: {
       chain,
       groups: [
+        // Keep identity money in its own group so Smart/KOL rows cannot be crowded out
+        // by price/ATH events in GMGN's per-group result limit.
         { mc_min: MIN_MARKET_CAP, signal_type: [12, 20] },
         { mc_min: MIN_MARKET_CAP, signal_type: [1, 6, 7, 8] },
         // 14/15/16 cannot be explicitly included in GMGN filters; collect them from an unfiltered group.
@@ -96,7 +117,7 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
   });
   const result = new Map<string, Signal>();
   for (const row of rowsFrom(payload, ["list", "items", "signals"])) {
-    const signalType = int(pick(row, "signal_type", "type"), 1);
+    const signalType = parseSignalType(pick(row, "signal_type", "type"));
     if (!TRACKED_SIGNAL_TYPES.has(signalType)) continue;
     const address = String(pick(row, "token_address", "address", "contract_address") || "").trim();
     if (!address) continue;
