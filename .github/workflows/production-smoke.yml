@@ -37,21 +37,23 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS --max-time 60 https://memetogo.vercel.app/api/feed -o /tmp/feed.json
-          jq '{generatedAt, hardGate, projectCount:(.projects|length), diagnostics}' /tmp/feed.json
-          jq -e '.hardGate.enabled == true and .hardGate.minMarketCap == 1000000 and .hardGate.requires == "smart_money_buy OR kol_buy" and (.projects|type) == "array" and (.diagnostics|type) == "array"' /tmp/feed.json >/dev/null
+          jq '{generatedAt, source, hardGate, projectCount:(.projects|length), diagnostics}' /tmp/feed.json
+          jq -e '.source.mode == "newsalert-shared-collector" and .hardGate.enabled == true and .hardGate.minMarketCap == 1000000 and .hardGate.requires == "smart_money_buy OR kol_buy" and (.projects|type) == "array" and (.diagnostics|type) == "array"' /tmp/feed.json >/dev/null
           jq -e '[.diagnostics[]?.errors[]?] | length == 0' /tmp/feed.json >/dev/null
 
-      - name: Verify first project detail when available
+      - name: Verify project detail path
         shell: bash
         run: |
           set -euo pipefail
           count=$(jq '.projects|length' /tmp/feed.json)
-          if [ "$count" -eq 0 ]; then
-            echo "No qualifying Smart Money/KOL project at this moment; detail smoke skipped."
-            exit 0
+          if [ "$count" -gt 0 ]; then
+            chain=$(jq -r '.projects[0].chain' /tmp/feed.json)
+            address=$(jq -r '.projects[0].address' /tmp/feed.json)
+          else
+            # Stable liquid Robinhood Chain token used only to exercise the detail plumbing.
+            chain="robinhood"
+            address="0x2e8c31162b855a2ffa90f6f8634643ad6f111e18"
           fi
-          chain=$(jq -r '.projects[0].chain' /tmp/feed.json)
-          address=$(jq -r '.projects[0].address' /tmp/feed.json)
           curl -fsS --max-time 90 "https://memetogo.vercel.app/api/token?chain=${chain}&address=${address}" -o /tmp/token.json
-          jq '{symbol, chain, address, candles:(.candles|length), traderCount:(.topTraders|length), hasCulture:(.culture != null)}' /tmp/token.json
-          jq -e '(.address|length) > 0 and (.candles|type) == "array" and (.topTraders|type) == "array"' /tmp/token.json >/dev/null
+          jq '{symbol:.info.symbol, chain:.info.chain, address:.info.address, candles:(.candles|length), traderCount:(.traders|length), hasCulture:(.culture != null), dataSource, diagnostics}' /tmp/token.json
+          jq -e '(.info.address|length) > 0 and (.candles|type) == "array" and (.traders|type) == "array" and (.culture != null) and .dataSource.identityFlow == "GMGN via Newsalert shared collector"' /tmp/token.json >/dev/null
