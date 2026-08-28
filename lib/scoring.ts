@@ -1,4 +1,5 @@
 import { MIN_MARKET_CAP } from "@/lib/gmgn";
+import { estimateMarkedBivariateHawkes } from "@/lib/hawkes";
 import type { AlphaProject, RankToken, Signal } from "@/lib/types";
 
 const clamp = (n: number, min = 0, max = 100) => Math.min(max, Math.max(min, n));
@@ -112,6 +113,7 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
     if (riskHigh(base.insiderRate, .3)) { score -= 15; risks.push(`内幕地址 ${(base.insiderRate! * 100).toFixed(0)}%`); }
     if (base.liquidity > 0 && base.liquidity < 100_000) { score -= 8; risks.push("流动性低于10万美元"); }
 
+    const hawkes = estimateMarkedBivariateHawkes(rows, nowEpoch);
     score = Math.round(clamp(score));
     const grade: AlphaProject["grade"] = score >= 85 ? "A+" : score >= 70 ? "A" : score >= 55 ? "B+" : "B";
     projects.push({
@@ -129,6 +131,7 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
       legacyP0Reasons: [...new Set(p0Reasons)],
       thesis: [...new Set(thesis)].slice(0, 6),
       risks: [...new Set(risks)],
+      hawkes,
     });
   }
 
