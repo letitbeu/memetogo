@@ -3,6 +3,7 @@ import type { Chain, KlineCandle, RankToken, Signal, Trader } from "@/lib/types"
 const HOST = (process.env.GMGN_OPENAPI_HOST || "https://openapi.gmgn.ai").replace(/\/$/, "");
 export const SIGNAL_CHAINS: Chain[] = ["sol", "bsc", "robinhood"];
 export const MIN_MARKET_CAP = 1_000_000;
+const SIGNAL_DISCOVERY_MIN_MARKET_CAP = 100_000;
 export const SIGNAL_LABELS: Record<number, string> = {
   1: "K线异动",
   6: "价格拉升",
@@ -106,12 +107,12 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
     body: {
       chain,
       groups: [
-        // Keep identity money in its own group so Smart/KOL rows cannot be crowded out
-        // by price/ATH events in GMGN's per-group result limit.
-        { mc_min: MIN_MARKET_CAP, signal_type: [12, 20] },
-        { mc_min: MIN_MARKET_CAP, signal_type: [1, 6, 7, 8] },
+        // Discovery is deliberately wider than the $1M listing gate. A token can
+        // receive Smart/KOL flow below $1M and cross the hard gate afterwards.
+        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP, signal_type: [12, 20] },
+        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP, signal_type: [1, 6, 7, 8] },
         // 14/15/16 cannot be explicitly included in GMGN filters; collect them from an unfiltered group.
-        { mc_min: MIN_MARKET_CAP },
+        { mc_min: SIGNAL_DISCOVERY_MIN_MARKET_CAP },
       ],
     },
   });
@@ -124,6 +125,9 @@ export async function fetchSignals(chain: Chain): Promise<Signal[]> {
     const triggerEpoch = epoch(pick(row, "trigger_at", "timestamp", "created_at"));
     const upstream = String(pick(row, "id", "signal_id") || `${address}:${signalType}:${Math.floor(triggerEpoch)}`);
     const marketCap = num(pick(row, "market_cap", "usd_market_cap", "marketcap", "mc"));
+    // The final product gate is current market cap >= $1M. Keep only rows that are
+    // already over the gate when GMGN provides current market cap; rank data is the
+    // fallback verifier when this field is absent.
     if (marketCap && marketCap < MIN_MARKET_CAP) continue;
     result.set(`${chain}:${upstream}`, {
       id: `${chain}:${upstream}`,
