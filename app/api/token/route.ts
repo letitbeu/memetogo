@@ -4,7 +4,7 @@ import { researchCulture } from "@/lib/culture";
 import { fetchPublicKline, fetchPublicTokenMarket } from "@/lib/marketdata";
 import { fetchNewsalertSnapshot, tokenContext } from "@/lib/newsalert";
 import { evaluateP0Plus } from "@/lib/wealth";
-import type { Chain } from "@/lib/types";
+import type { Chain, KlineCandle, Trader } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
       diagnostics.push(`DEX Screener: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    let candles = [];
+    let candles: KlineCandle[] = [];
     if (market?.pairAddress) {
       try {
         candles = await fetchPublicKline(chain, address, market.pairAddress);
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
       bundlerRate: info.bundlerRate,
       insiderRate: info.insiderRate,
     };
-    const traders: [] = [];
+    const traders: Trader[] = [];
     const wealth = evaluateP0Plus(riskToken, traders);
 
     return NextResponse.json({
