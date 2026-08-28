@@ -44,7 +44,7 @@ jobs:
           jq -e '[.diagnostics[] | (.identityWarnings[]?, .errors[]?)] | length == 0' /tmp/feed.json >/dev/null
           count=$(jq '.projects|length' /tmp/feed.json)
           if [ "$count" -gt 0 ]; then
-            jq -e '.projects[0].hawkes.version == "marked-bivariate-em-v1" and (.projects[0].hawkes.reproductionNumber|type) == "number" and (.projects[0].hawkes.endogenousRatio|type) == "number" and (.projects[0].hawkes.smartToKol|type) == "number" and (.projects[0].hawkes.kolToSmart|type) == "number" and (.projects[0].hawkes.regime|type) == "string"' /tmp/feed.json >/dev/null
+            jq -e '.projects[0].hawkes.version == "marked-bivariate-em-v2-adaptive" and (.projects[0].hawkes.reproductionNumber|type) == "number" and (.projects[0].hawkes.endogenousRatio|type) == "number" and (.projects[0].hawkes.localEvidenceWeight|type) == "number" and (.projects[0].hawkes.expectedTriggered60m|type) == "number" and (.projects[0].hawkes.horizonMinutes|type) == "number" and (.projects[0].hawkes.kernelHalfLifeMinutes|type) == "number" and (.projects[0].hawkes.regime|type) == "string"' /tmp/feed.json >/dev/null
           fi
 
       - name: Verify independent project detail path
