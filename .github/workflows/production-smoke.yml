@@ -39,9 +39,13 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS --max-time 90 https://memetogo.vercel.app/api/feed -o /tmp/feed.json
-          jq '{generatedAt, source, hardGate, projectCount:(.projects|length), diagnostics}' /tmp/feed.json
+          jq '{generatedAt, source, hardGate, projectCount:(.projects|length), hawkesSample:(if (.projects|length)>0 then .projects[0].hawkes else null end), diagnostics}' /tmp/feed.json
           jq -e '.source.mode == "memetogo-independent-gmgn" and .source.apiKeyScope == "memetogo-only" and .source.refreshSeconds == 60 and .hardGate.enabled == true and .hardGate.minMarketCap == 1000000 and .hardGate.requires == "smart_money_buy OR kol_buy" and (.projects|type) == "array" and (.diagnostics|type) == "array"' /tmp/feed.json >/dev/null
           jq -e '[.diagnostics[]?.errors[]?] | length == 0' /tmp/feed.json >/dev/null
+          count=$(jq '.projects|length' /tmp/feed.json)
+          if [ "$count" -gt 0 ]; then
+            jq -e '.projects[0].hawkes.version == "marked-bivariate-em-v1" and (.projects[0].hawkes.reproductionNumber|type) == "number" and (.projects[0].hawkes.endogenousRatio|type) == "number" and (.projects[0].hawkes.smartToKol|type) == "number" and (.projects[0].hawkes.kolToSmart|type) == "number" and (.projects[0].hawkes.regime|type) == "string"' /tmp/feed.json >/dev/null
+          fi
 
       - name: Verify independent project detail path
         shell: bash
