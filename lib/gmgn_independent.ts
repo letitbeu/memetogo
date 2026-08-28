@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { fetchRank, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchRank, fetchTokenInfo, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
 import { fetchIdentityBuySignals } from "@/lib/gmgn_identity";
 import type { Chain, RankToken, Signal, Trader } from "@/lib/types";
 
@@ -117,6 +117,16 @@ const cachedTopTraders = unstable_cache(
 
 export async function fetchIndependentTopTraders(chain: Chain, address: string): Promise<Trader[]> {
   return cachedTopTraders(chain, address.toLowerCase());
+}
+
+const cachedTokenInfo = unstable_cache(
+  async (chain: Chain, address: string) => fetchTokenInfo(chain, address),
+  ["memetogo-independent-gmgn-token-info-v1"],
+  { revalidate: 300 },
+);
+
+export async function fetchIndependentTokenInfo(chain: Chain, address: string) {
+  return cachedTokenInfo(chain, address.toLowerCase());
 }
 
 export function tokenContext(snapshot: IndependentSnapshot, chain: Chain, address: string) {
