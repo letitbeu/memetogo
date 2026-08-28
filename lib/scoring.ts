@@ -59,23 +59,23 @@ export function buildAlphaProjects(signals: Signal[], ranks: RankToken[], nowEpo
 
     if (smartSignals.length) {
       score += 32 + Math.min(12, Math.max(0, smartSignals.length - 1) * 4);
-      thesis.push(`聪明钱买入信号 ×${smartSignals.length}`);
+      thesis.push(`近期SM买入 ${smartSignals.length}笔`);
     }
     if (kolSignals.length) {
       score += 26 + Math.min(12, Math.max(0, kolSignals.length - 1) * 4);
-      thesis.push(`KOL买入信号 ×${kolSignals.length}`);
+      thesis.push(`近期KOL买入 ${kolSignals.length}笔`);
     }
     if (smartSignals.length && kolSignals.length) {
       score += 16;
-      thesis.push("聪明钱与KOL同向共振");
+      thesis.push("SM与KOL近期同向买入");
     }
     if (base.smartCount >= 3) {
       score += 18 + (base.smartCount >= 5 ? 6 : 0);
-      thesis.push(`当前聪明钱钱包 ${base.smartCount} 个`);
+      thesis.push(`当前SM持仓 ${base.smartCount}钱包`);
     }
     if (base.kolCount >= 2) {
       score += 10 + (base.kolCount >= 4 ? 5 : 0);
-      thesis.push(`当前KOL/知名钱包 ${base.kolCount} 个`);
+      thesis.push(`当前KOL持仓 ${base.kolCount}钱包`);
     }
     if (signalTypes.has(14)) { score += 8; thesis.push("伴随巨额买入"); }
     if (signalTypes.has(15)) { score += 5; thesis.push("伴随多钱包买入"); }
