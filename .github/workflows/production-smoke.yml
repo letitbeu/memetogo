@@ -8,13 +8,13 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - name: Wait for current production deployment
         shell: bash
         run: |
           set -euo pipefail
-          for i in {1..36}; do
+          for i in {1..48}; do
             code=$(curl -sS -o /tmp/health.json -w '%{http_code}' --max-time 20 https://memetogo.vercel.app/api/health || true)
             deployed=$(jq -r '.commitSha // empty' /tmp/health.json 2>/dev/null || true)
             if [ "$code" = "200" ] && [ "$deployed" = "$GITHUB_SHA" ]; then
@@ -27,23 +27,23 @@ jobs:
           echo "Production alias did not reach current commit"
           exit 1
 
-      - name: Verify environment health
+      - name: Verify independent environment health
         shell: bash
         run: |
           set -euo pipefail
           cat /tmp/health.json
-          jq -e '.ok == true and .gmgnConfigured == true and .deepseekConfigured == true and .mode == "smart-kol-first" and .architecture == "newsalert-shared-collector-v2" and .minMarketCap == 1000000' /tmp/health.json >/dev/null
+          jq -e '.ok == true and .gmgnConfigured == true and .deepseekConfigured == true and .mode == "smart-kol-first" and .architecture == "memetogo-independent-gmgn-v1" and .gmgnKeyScope == "memetogo-only" and .collectorRefreshSeconds == 60 and .minMarketCap == 1000000' /tmp/health.json >/dev/null
 
-      - name: Verify live GMGN feed
+      - name: Verify independent live GMGN feed
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS --max-time 60 https://memetogo.vercel.app/api/feed -o /tmp/feed.json
+          curl -fsS --max-time 90 https://memetogo.vercel.app/api/feed -o /tmp/feed.json
           jq '{generatedAt, source, hardGate, projectCount:(.projects|length), diagnostics}' /tmp/feed.json
-          jq -e '.source.mode == "newsalert-shared-collector" and .hardGate.enabled == true and .hardGate.minMarketCap == 1000000 and .hardGate.requires == "smart_money_buy OR kol_buy" and (.projects|type) == "array" and (.diagnostics|type) == "array"' /tmp/feed.json >/dev/null
+          jq -e '.source.mode == "memetogo-independent-gmgn" and .source.apiKeyScope == "memetogo-only" and .source.refreshSeconds == 60 and .hardGate.enabled == true and .hardGate.minMarketCap == 1000000 and .hardGate.requires == "smart_money_buy OR kol_buy" and (.projects|type) == "array" and (.diagnostics|type) == "array"' /tmp/feed.json >/dev/null
           jq -e '[.diagnostics[]?.errors[]?] | length == 0' /tmp/feed.json >/dev/null
 
-      - name: Verify project detail path
+      - name: Verify independent project detail path
         shell: bash
         run: |
           set -euo pipefail
@@ -52,10 +52,9 @@ jobs:
             chain=$(jq -r '.projects[0].chain' /tmp/feed.json)
             address=$(jq -r '.projects[0].address' /tmp/feed.json)
           else
-            # Stable liquid Robinhood Chain token used only to exercise the detail plumbing.
             chain="robinhood"
             address="0x2e8c31162b855a2ffa90f6f8634643ad6f111e18"
           fi
-          curl -fsS --max-time 90 "https://memetogo.vercel.app/api/token?chain=${chain}&address=${address}" -o /tmp/token.json
+          curl -fsS --max-time 120 "https://memetogo.vercel.app/api/token?chain=${chain}&address=${address}" -o /tmp/token.json
           jq '{symbol:.info.symbol, chain:.info.chain, address:.info.address, candles:(.candles|length), traderCount:(.traders|length), hasCulture:(.culture != null), dataSource, diagnostics}' /tmp/token.json
-          jq -e '(.info.address|length) > 0 and (.candles|type) == "array" and (.traders|type) == "array" and (.culture != null) and .dataSource.identityFlow == "GMGN via Newsalert shared collector"' /tmp/token.json >/dev/null
+          jq -e '(.info.address|length) > 0 and (.candles|type) == "array" and (.traders|type) == "array" and (.culture != null) and .dataSource.identityFlow == "GMGN via MemeToGo independent collector" and .dataSource.topTraders == "GMGN via MemeToGo key, 5m cached"' /tmp/token.json >/dev/null
