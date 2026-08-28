@@ -8,6 +8,9 @@ export async function GET() {
     gmgnConfigured: Boolean(process.env.GMGN_API_KEY),
     deepseekConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
     mode: "smart-kol-first",
+    architecture: "newsalert-shared-collector-v2",
     minMarketCap: 1_000_000,
+    commitSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
+    vercelEnv: process.env.VERCEL_ENV || null,
   });
 }
