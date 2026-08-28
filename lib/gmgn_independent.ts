@@ -1,10 +1,13 @@
 import { unstable_cache } from "next/cache";
-import { fetchRank, fetchSignals, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchRank, fetchSignalsDetailed, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
 import type { Chain, RankToken, Signal, Trader } from "@/lib/types";
 
 export type ChainDiagnostics = {
   chain: Chain;
   signalCount: number;
+  signalRawRows: number;
+  signalParsedRows: number;
+  signalTypeCounts: Record<string, number>;
   rankCount: number;
   errors: string[];
 };
@@ -29,9 +32,16 @@ async function collectFresh(): Promise<IndependentSnapshot> {
     const errors: string[] = [];
     let chainSignals: Signal[] = [];
     let chainRanks: RankToken[] = [];
+    let signalRawRows = 0;
+    let signalParsedRows = 0;
+    let signalTypeCounts: Record<string, number> = {};
 
     try {
-      chainSignals = await fetchSignals(chain);
+      const signalResult = await fetchSignalsDetailed(chain);
+      chainSignals = signalResult.signals;
+      signalRawRows = signalResult.diagnostic.rawRows;
+      signalParsedRows = signalResult.diagnostic.parsedRows;
+      signalTypeCounts = signalResult.diagnostic.rawTypeCounts;
       signals.push(...chainSignals);
     } catch (error) {
       errors.push(`Signal: ${error instanceof Error ? error.message : String(error)}`);
@@ -49,6 +59,9 @@ async function collectFresh(): Promise<IndependentSnapshot> {
     diagnostics.push({
       chain,
       signalCount: chainSignals.length,
+      signalRawRows,
+      signalParsedRows,
+      signalTypeCounts,
       rankCount: chainRanks.length,
       errors,
     });
@@ -66,7 +79,7 @@ async function collectFresh(): Promise<IndependentSnapshot> {
 
 const cachedSnapshot = unstable_cache(
   collectFresh,
-  ["memetogo-independent-gmgn-snapshot-v1"],
+  ["memetogo-independent-gmgn-snapshot-v2"],
   { revalidate: 60 },
 );
 
