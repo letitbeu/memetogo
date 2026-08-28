@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { fetchRank, fetchSignalsDetailed, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchRank, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
 import { fetchIdentityBuySignals } from "@/lib/gmgn_identity";
 import type { Chain, RankToken, Signal, Trader } from "@/lib/types";
 
@@ -32,25 +32,23 @@ async function collectFresh(): Promise<IndependentSnapshot> {
   const ranks: RankToken[] = [];
   const diagnostics: ChainDiagnostics[] = [];
 
-  // Sequential per chain to protect the dedicated MemeToGo GMGN key from burst limits.
+  // Budgeted production path: 3 chains × (Smart/KOL identity feeds + Rank) = 9 calls.
+  // token_signal is intentionally removed from the hot path: it has returned zero rows
+  // on this key and adds quota cost without improving the Smart/KOL hard gate or Hawkes model.
   for (const chain of SIGNAL_CHAINS) {
     const errors: string[] = [];
-    const mergedSignals = new Map<string, Signal>();
+    let chainSignals: Signal[] = [];
     let chainRanks: RankToken[] = [];
-    let signalRawRows = 0;
-    let signalParsedRows = 0;
-    let signalTypeCounts: Record<string, number> = {};
     let smartTradeRows = 0;
     let smartBuyRows = 0;
     let kolTradeRows = 0;
     let kolBuyRows = 0;
     let identityWarnings: string[] = [];
 
-    // Primary identity-flow source: actual GMGN Smart Money/KOL trade feeds.
-    // These are API-key-only public platform-tagged wallet streams.
     try {
       const identityResult = await fetchIdentityBuySignals(chain);
-      for (const signal of identityResult.signals) mergedSignals.set(signal.id, signal);
+      chainSignals = identityResult.signals;
+      signals.push(...chainSignals);
       smartTradeRows = identityResult.diagnostic.smartRawRows;
       smartBuyRows = identityResult.diagnostic.smartBuyRows;
       kolTradeRows = identityResult.diagnostic.kolRawRows;
@@ -60,22 +58,7 @@ async function collectFresh(): Promise<IndependentSnapshot> {
       identityWarnings.push(`Identity: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    await pause(350);
-
-    // Secondary/context source: market token_signal. It supplies price/ATH/large-buy
-    // P0 context when available, but an empty token_signal response cannot disable
-    // the Smart/KOL hard gate because identity BUY trades are collected above.
-    try {
-      const signalResult = await fetchSignalsDetailed(chain);
-      for (const signal of signalResult.signals) mergedSignals.set(signal.id, signal);
-      signalRawRows = signalResult.diagnostic.rawRows;
-      signalParsedRows = signalResult.diagnostic.parsedRows;
-      signalTypeCounts = signalResult.diagnostic.rawTypeCounts;
-    } catch (error) {
-      errors.push(`Signal context: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    await pause(350);
+    await pause(700);
 
     try {
       chainRanks = await fetchRank(chain);
@@ -84,15 +67,12 @@ async function collectFresh(): Promise<IndependentSnapshot> {
       errors.push(`Rank: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const chainSignals = [...mergedSignals.values()].sort((a, b) => b.triggerEpoch - a.triggerEpoch);
-    signals.push(...chainSignals);
-
     diagnostics.push({
       chain,
       signalCount: chainSignals.length,
-      signalRawRows,
-      signalParsedRows,
-      signalTypeCounts,
+      signalRawRows: 0,
+      signalParsedRows: 0,
+      signalTypeCounts: {},
       smartTradeRows,
       smartBuyRows,
       kolTradeRows,
@@ -102,7 +82,7 @@ async function collectFresh(): Promise<IndependentSnapshot> {
       errors,
     });
 
-    await pause(350);
+    await pause(700);
   }
 
   return {
@@ -115,8 +95,8 @@ async function collectFresh(): Promise<IndependentSnapshot> {
 
 const cachedSnapshot = unstable_cache(
   collectFresh,
-  ["memetogo-independent-gmgn-snapshot-v3"],
-  { revalidate: 60 },
+  ["memetogo-independent-gmgn-snapshot-v4-budgeted"],
+  { revalidate: 120 },
 );
 
 let inFlight: Promise<IndependentSnapshot> | null = null;
