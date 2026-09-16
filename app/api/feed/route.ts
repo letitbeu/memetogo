@@ -28,6 +28,11 @@ export async function GET() {
         identitySource: signal.identitySource || null,
       }));
 
+    // Expose the current Rank market snapshot separately from Alpha eligibility.
+    // The browser uses this to refresh rolling-history rows with live market data
+    // and immediately remove projects that have fallen below the current $1M gate.
+    const marketStates = snapshot.ranks.map(rank => ({ ...rank }));
+
     const payload = {
       generatedAt: new Date().toISOString(),
       source: {
@@ -42,6 +47,7 @@ export async function GET() {
         enabled: true,
       },
       projects,
+      marketStates,
       identityEvents,
       diagnostics: snapshot.diagnostics,
     };
@@ -52,7 +58,7 @@ export async function GET() {
     });
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : String(error), projects: [], identityEvents: [] },
+      { error: error instanceof Error ? error.message : String(error), projects: [], marketStates: [], identityEvents: [] },
       { status: 500 },
     );
   }
