@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
-import { fetchRank, fetchTokenInfo, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
+import { fetchKline, fetchRank, fetchTokenInfo, fetchTopTraders, SIGNAL_CHAINS } from "@/lib/gmgn";
 import { fetchIdentityBuySignals } from "@/lib/gmgn_identity";
-import type { Chain, RankToken, Signal, Trader } from "@/lib/types";
+import type { Chain, KlineCandle, RankToken, Signal, Trader } from "@/lib/types";
 
 export type ChainDiagnostics = {
   chain: Chain;
@@ -32,9 +32,8 @@ async function collectFresh(): Promise<IndependentSnapshot> {
   const ranks: RankToken[] = [];
   const diagnostics: ChainDiagnostics[] = [];
 
-  // Budgeted production path: 3 chains × (Smart/KOL identity feeds + Rank) = 9 calls.
-  // token_signal is intentionally removed from the hot path: it has returned zero rows
-  // on this key and adds quota cost without improving the Smart/KOL hard gate or Hawkes model.
+  // Budgeted production path: 4 chains × (Smart/KOL identity feeds + Rank) = 12 calls / 120s.
+  // Arc is collected through GMGN directly so launch-day indexing does not depend on third parties.
   for (const chain of SIGNAL_CHAINS) {
     const errors: string[] = [];
     let chainSignals: Signal[] = [];
@@ -95,7 +94,7 @@ async function collectFresh(): Promise<IndependentSnapshot> {
 
 const cachedSnapshot = unstable_cache(
   collectFresh,
-  ["memetogo-independent-gmgn-snapshot-v4-budgeted"],
+  ["memetogo-independent-gmgn-snapshot-v5-arc"],
   { revalidate: 120 },
 );
 
@@ -127,6 +126,16 @@ const cachedTokenInfo = unstable_cache(
 
 export async function fetchIndependentTokenInfo(chain: Chain, address: string) {
   return cachedTokenInfo(chain, address.toLowerCase());
+}
+
+const cachedKline = unstable_cache(
+  async (chain: Chain, address: string, resolution: string, hours: number): Promise<KlineCandle[]> => fetchKline(chain, address, resolution, hours),
+  ["memetogo-independent-gmgn-kline-v1"],
+  { revalidate: 30 },
+);
+
+export async function fetchIndependentKline(chain: Chain, address: string, resolution = "5m", hours = 24): Promise<KlineCandle[]> {
+  return cachedKline(chain, address.toLowerCase(), resolution, hours);
 }
 
 export function tokenContext(snapshot: IndependentSnapshot, chain: Chain, address: string) {
