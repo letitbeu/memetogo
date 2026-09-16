@@ -189,9 +189,29 @@ function buyDecision(project: AlphaProject) {
   if (h.regime === "overheated") score -= 15;
   if (h.regime === "upstream_ignition") score += 8;
 
+  const veryBullish =
+    score >= 85 &&
+    rho >= .60 && rho <= .90 &&
+    h.smartToSmart >= .15 &&
+    h.smartToKol >= .15 &&
+    h.expectedTriggered60m >= .35 &&
+    h.endogenousRatio >= .35 &&
+    h.localEvidenceWeight >= .50 &&
+    h.confidence !== "low" &&
+    h.eventCount >= 4 &&
+    h.smartEvents >= 2 &&
+    h.kolEvents >= 1 &&
+    smLead &&
+    !priceExtended &&
+    !weakLiquidity &&
+    h.regime !== "overheated";
+
   let verdict: string;
   let tone: string;
-  if (score >= 72) {
+  if (veryBullish) {
+    verdict = "非常看好";
+    tone = "strong";
+  } else if (score >= 72) {
     verdict = "可小仓试错";
     tone = "bull";
   } else if (score >= 54) {
@@ -205,8 +225,8 @@ function buyDecision(project: AlphaProject) {
     tone = "risk";
   }
 
-  if (h.regime === "overheated" && verdict === "可小仓试错") verdict = "不建议追价";
-  if (kolLead && h.smartToSmart < .15 && verdict === "可小仓试错") verdict = "等确认再买";
+  if (h.regime === "overheated" && (verdict === "非常看好" || verdict === "可小仓试错")) verdict = "不建议追价";
+  if (kolLead && h.smartToSmart < .15 && (verdict === "非常看好" || verdict === "可小仓试错")) verdict = "等确认再买";
 
   const halfLife = Math.max(1, Math.round(h.kernelHalfLifeMinutes));
   const idealRho = rho < .65 ? "ρ 升向 0.65–0.85" : rho <= .85 ? "ρ 保持在 0.65–0.85" : "ρ 回落并稳定在 0.65–0.85";
@@ -215,7 +235,8 @@ function buyDecision(project: AlphaProject) {
   const relayNeed = h.expectedTriggered60m < .25 ? `未来1小时接力预期 ${h.expectedTriggered60m.toFixed(2)}→≥0.25` : "未来1小时接力预期维持 ≥0.25";
 
   let summary = `当前资金传播强度 ${rho.toFixed(2)}，未来1小时由现有传播带出至少一次新身份资金事件的近似概率约 ${(relayProbability * 100).toFixed(0)}%。`;
-  if (kolLead) summary += " 目前由 KOL 热度带动聪明钱的程度更高，属于偏后段的扩散结构，不是最理想的早期点火。";
+  if (veryBullish) summary += " 当前同时满足聪明钱领先、跨群体传播、连续买入、接力预期和本地证据等高质量条件，属于模型中少见的高置信早期传播结构。";
+  else if (kolLead) summary += " 目前由 KOL 热度带动聪明钱的程度更高，属于偏后段的扩散结构，不是最理想的早期点火。";
   else if (smLead) summary += " 当前由聪明钱向 KOL 扩散，传播方向更符合早期 Alpha 的理想结构。";
   else summary += " 当前聪明钱与 KOL 的主导关系还不够明确。";
   if (priceExtended) summary += " 同时价格短线已经明显拉升，买点赔率进一步下降。";
@@ -225,11 +246,17 @@ function buyDecision(project: AlphaProject) {
     tone,
     summary,
     relayProbability,
-    forecast: `未来 ${halfLife} 分钟是关键观察窗口。若没有新的身份资金事件，现有 Hawkes 激发会按指数核自然衰减；若继续出现新 SM，传播强度和聪明钱连续性应抬升。`,
-    upgrade: `${idealRho}；${smartNeed}；${crossNeed}；${relayNeed}。上述条件至少出现 2 项同步改善，才更适合从“观察”升级到“买入”。`,
-    downgrade: kolLead
-      ? `若 KOL 连续性继续上升，但聪明钱连续性仍低于 0.15、聪明钱→KOL 继续弱于 KOL→聪明钱，则更像情绪扩散，应继续降低追价意愿。`
-      : `若 ρ 跌破约 0.30、未来1小时接力预期降到 0.15 以下，或聪明钱连续性明显回落，说明传播开始衰减。`,
+    forecast: veryBullish
+      ? `未来 ${halfLife} 分钟重点看强结构能否延续：聪明钱继续出现、SM→KOL 不回落、ρ 保持在健康高位而不过热。如果这些条件维持，说明传播正在从“点火”进入自持续扩散。`
+      : `未来 ${halfLife} 分钟是关键观察窗口。若没有新的身份资金事件，现有 Hawkes 激发会按指数核自然衰减；若继续出现新 SM，传播强度和聪明钱连续性应抬升。`,
+    upgrade: veryBullish
+      ? "当前已处于最高档。后续不需要指标继续无限上升，反而要观察 ρ 不要冲到过热区、聪明钱继续领先且价格不过度垂直拉升，才能维持“非常看好”。"
+      : `${idealRho}；${smartNeed}；${crossNeed}；${relayNeed}。普通信号至少出现 2 项同步改善；若要升级到“非常看好”，还需要聪明钱明确领先、项目自身数据占比 ≥50%、至少中等置信度且价格尚未短线暴涨。`,
+    downgrade: veryBullish
+      ? "若聪明钱停止接力、SM→KOL 明显回落、KOL 反向主导，或 ρ 升入过热区并伴随价格急拉，则从“非常看好”降级，不再按最高档处理。"
+      : kolLead
+        ? "若 KOL 连续性继续上升，但聪明钱连续性仍低于 0.15、聪明钱→KOL 继续弱于 KOL→聪明钱，则更像情绪扩散，应继续降低追价意愿。"
+        : "若 ρ 跌破约 0.30、未来1小时接力预期降到 0.15 以下，或聪明钱连续性明显回落，说明传播开始衰减。",
   };
 }
 
