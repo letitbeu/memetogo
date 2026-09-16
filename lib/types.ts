@@ -87,6 +87,8 @@ export type AlphaProject = RankToken & {
   thesis: string[];
   risks: string[];
   hawkes: HawkesMetrics;
+  marketDataStale?: boolean;
+  marketDataAsOf?: string;
 };
 
 export type KlineCandle = {
