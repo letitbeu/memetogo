@@ -1,7 +1,7 @@
 import type { Chain, KlineCandle } from "@/lib/types";
 
-const DEX_CHAIN: Record<Chain, string> = { sol: "solana", bsc: "bsc", robinhood: "robinhood" };
-const GT_NETWORK: Record<Chain, string> = { sol: "solana", bsc: "bsc", robinhood: "robinhood" };
+const DEX_CHAIN: Record<Chain, string> = { sol: "solana", bsc: "bsc", robinhood: "robinhood", arc: "arc" };
+const GT_NETWORK: Record<Chain, string> = { sol: "solana", bsc: "bsc", robinhood: "robinhood", arc: "arc" };
 
 function num(value: unknown, fallback = 0) {
   const n = Number(value);
