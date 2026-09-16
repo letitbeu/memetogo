@@ -19,7 +19,7 @@ function valid(row: unknown): row is IdentityHistoryEvent {
   if (!row || typeof row !== "object") return false;
   const x = row as Record<string, unknown>;
   return typeof x.id === "string" && typeof x.address === "string" &&
-    (x.chain === "sol" || x.chain === "bsc" || x.chain === "robinhood") &&
+    (x.chain === "sol" || x.chain === "bsc" || x.chain === "robinhood" || x.chain === "arc") &&
     (x.signalType === 12 || x.signalType === 20) && Number.isFinite(Number(x.triggerEpoch));
 }
 
