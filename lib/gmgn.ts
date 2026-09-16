@@ -1,7 +1,7 @@
 import type { Chain, KlineCandle, RankToken, Signal, Trader } from "@/lib/types";
 
 const HOST = (process.env.GMGN_OPENAPI_HOST || "https://openapi.gmgn.ai").replace(/\/$/, "");
-export const SIGNAL_CHAINS: Chain[] = ["sol", "bsc", "robinhood"];
+export const SIGNAL_CHAINS: Chain[] = ["sol", "bsc", "robinhood", "arc"];
 export const MIN_MARKET_CAP = 1_000_000;
 const SIGNAL_DISCOVERY_MIN_MARKET_CAP = 100_000;
 const SIGNAL_DISCOVERY_MAX_MARKET_CAP = 100_000_000;
