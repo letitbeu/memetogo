@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import DetailRequestStabilizer from "./detail-request-stabilizer";
 import "./globals.css";
+import "./kline.css";
 
 export const metadata: Metadata = {
   title: "MemeToGo Alpha Radar",
