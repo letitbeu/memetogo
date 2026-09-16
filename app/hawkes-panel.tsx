@@ -39,10 +39,6 @@ function outlook(project: AlphaProject) {
     };
   }
 
-  const rho = h.reproductionNumber;
-  const endo = h.endogenousRatio;
-  const evidence = h.localEvidenceWeight;
-  const forecast = h.expectedTriggered60m;
   const smLead = h.smartToKol > h.kolToSmart * 1.2;
   const kolLead = h.kolToSmart > h.smartToKol * 1.2;
   const priceExtended = project.change5m >= 20;
@@ -89,7 +85,9 @@ function outlook(project: AlphaProject) {
       bias: "高波动 · 谨慎追涨",
       tone: "risk",
       structure: "聪明钱和 KOL 的买入已经高度互相带动，资金传播非常拥挤，市场进入高热状态。",
-      outlook: `${priceExtended ? "价格也已经快速拉升，说明资金和价格同时过热，继续追高的回撤风险明显增加。" : "价格还没完全垂直拉升，但资金传播已经很热，后续波动通常会明显放大。"}`,
+      outlook: priceExtended
+        ? "价格也已经快速拉升，说明资金和价格同时过热，继续追高的回撤风险明显增加。"
+        : "价格还没完全垂直拉升，但资金传播已经很热，后续波动通常会明显放大。",
       confirm: "更健康的情况是资金热度稍微降下来，但价格、成交和流动性仍能维持强势。",
       invalidation: "如果身份资金突然停止买入，同时价格跌回启动区，通常意味着这轮资金接力开始结束。",
     };
@@ -149,10 +147,97 @@ function outlook(project: AlphaProject) {
   };
 }
 
+function buyDecision(project: AlphaProject) {
+  const h = project.hawkes;
+  if (!h || h.eventCount === 0) {
+    return {
+      verdict: "暂不买",
+      tone: "neutral",
+      summary: "没有可用的身份资金传播事件，Hawkes 目前不能提供买点依据。",
+      relayProbability: 0,
+      forecast: "先等第一笔聪明钱或 KOL 买入出现。",
+      upgrade: "出现聪明钱连续买入，并开始带动 KOL，才进入可观察区。",
+      downgrade: "无传播结构可失效。",
+    };
+  }
+
+  const rho = h.reproductionNumber;
+  const relayProbability = Math.max(0, Math.min(1, 1 - Math.exp(-Math.max(0, h.expectedTriggered60m))));
+  const smLead = h.smartToKol > h.kolToSmart * 1.2;
+  const kolLead = h.kolToSmart > h.smartToKol * 1.2;
+  const priceExtended = project.change5m >= 20;
+  const weakLiquidity = project.liquidity > 0 && project.liquidity < 100_000;
+
+  let score = 45;
+  if (rho >= .45 && rho <= .85) score += 15;
+  else if (rho >= .25 && rho < .45) score += 5;
+  else if (rho > .95) score -= 18;
+  else if (rho < .2) score -= 10;
+
+  if (h.smartToSmart >= .15) score += 8;
+  if (smLead) score += 14;
+  if (kolLead) score -= 12;
+  if (h.expectedTriggered60m >= .5) score += 10;
+  else if (h.expectedTriggered60m >= .25) score += 6;
+  else if (h.expectedTriggered60m < .15) score -= 6;
+  if (h.localEvidenceWeight >= .5) score += 6;
+  else if (h.localEvidenceWeight < .25) score -= 5;
+  if (h.confidence === "high") score += 6;
+  if (h.confidence === "low") score -= 5;
+  if (priceExtended) score -= 10;
+  if (weakLiquidity) score -= 10;
+  if (h.regime === "overheated") score -= 15;
+  if (h.regime === "upstream_ignition") score += 8;
+
+  let verdict: string;
+  let tone: string;
+  if (score >= 72) {
+    verdict = "可小仓试错";
+    tone = "bull";
+  } else if (score >= 54) {
+    verdict = "等确认再买";
+    tone = "warn";
+  } else if (score >= 38) {
+    verdict = "不建议追价";
+    tone = "warn";
+  } else {
+    verdict = "回避";
+    tone = "risk";
+  }
+
+  if (h.regime === "overheated" && verdict === "可小仓试错") verdict = "不建议追价";
+  if (kolLead && h.smartToSmart < .15 && verdict === "可小仓试错") verdict = "等确认再买";
+
+  const halfLife = Math.max(1, Math.round(h.kernelHalfLifeMinutes));
+  const idealRho = rho < .65 ? "ρ 升向 0.65–0.85" : rho <= .85 ? "ρ 保持在 0.65–0.85" : "ρ 回落并稳定在 0.65–0.85";
+  const smartNeed = h.smartToSmart < .15 ? `聪明钱连续性 ${h.smartToSmart.toFixed(2)}→≥0.15` : `聪明钱连续性维持 ≥0.15`;
+  const crossNeed = h.smartToKol < .15 ? `聪明钱→KOL ${h.smartToKol.toFixed(2)}→≥0.15` : "聪明钱→KOL 维持较强";
+  const relayNeed = h.expectedTriggered60m < .25 ? `未来1小时接力预期 ${h.expectedTriggered60m.toFixed(2)}→≥0.25` : "未来1小时接力预期维持 ≥0.25";
+
+  let summary = `当前资金传播强度 ${rho.toFixed(2)}，未来1小时由现有传播带出至少一次新身份资金事件的近似概率约 ${(relayProbability * 100).toFixed(0)}%。`;
+  if (kolLead) summary += " 目前由 KOL 热度带动聪明钱的程度更高，属于偏后段的扩散结构，不是最理想的早期点火。";
+  else if (smLead) summary += " 当前由聪明钱向 KOL 扩散，传播方向更符合早期 Alpha 的理想结构。";
+  else summary += " 当前聪明钱与 KOL 的主导关系还不够明确。";
+  if (priceExtended) summary += " 同时价格短线已经明显拉升，买点赔率进一步下降。";
+
+  return {
+    verdict,
+    tone,
+    summary,
+    relayProbability,
+    forecast: `未来 ${halfLife} 分钟是关键观察窗口。若没有新的身份资金事件，现有 Hawkes 激发会按指数核自然衰减；若继续出现新 SM，传播强度和聪明钱连续性应抬升。`,
+    upgrade: `${idealRho}；${smartNeed}；${crossNeed}；${relayNeed}。上述条件至少出现 2 项同步改善，才更适合从“观察”升级到“买入”。`,
+    downgrade: kolLead
+      ? `若 KOL 连续性继续上升，但聪明钱连续性仍低于 0.15、聪明钱→KOL 继续弱于 KOL→聪明钱，则更像情绪扩散，应继续降低追价意愿。`
+      : `若 ρ 跌破约 0.30、未来1小时接力预期降到 0.15 以下，或聪明钱连续性明显回落，说明传播开始衰减。`,
+  };
+}
+
 export default function HawkesPanel({ project }: { project: AlphaProject }) {
   const h = project.hawkes;
   if (!h) return <section><div className="section-title"><h3>Hawkes 资金传播</h3><span>等待模型数据</span></div><p className="muted">该项目尚未生成资金传播数据。</p></section>;
   const view = outlook(project);
+  const decision = buyDecision(project);
   const horizonLabel = h.horizonMinutes >= 60 ? `${(h.horizonMinutes / 60).toFixed(h.horizonMinutes % 60 ? 1 : 0)}H` : `${h.horizonMinutes}m`;
   const relay = relayLevel(h.expectedTriggered60m);
 
@@ -187,6 +272,19 @@ export default function HawkesPanel({ project }: { project: AlphaProject }) {
       <div><span>什么情况说明信号失效</span><p>{view.invalidation}</p></div>
     </div>
 
-    <p className={styles.note}>简单读法：先看“聪明钱有没有继续买”，再看“KOL 有没有接力”。资金传播强度越高，说明这些买入越容易互相带动；但太高也可能意味着已经过热。项目自身数据占比越高，这个判断越依赖该项目真实历史，而不是模型先验。该模块暂不计入 Alpha Score。</p>
+    <div className={`${styles.decision} ${styles[`decision_${decision.tone}`]}`}>
+      <div className={styles.decisionHead}>
+        <div><span>Hawkes 资金传播总结</span><strong>{decision.verdict}</strong></div>
+        <div className={styles.probability}><span>未来1小时接力概率</span><b>{(decision.relayProbability * 100).toFixed(0)}%</b></div>
+      </div>
+      <p className={styles.decisionSummary}>{decision.summary}</p>
+      <div className={styles.decisionGrid}>
+        <div><span>未来30–60分钟怎么演化</span><p>{decision.forecast}</p></div>
+        <div><span>什么变化后更值得买</span><p>{decision.upgrade}</p></div>
+        <div><span>什么变化后应该放弃</span><p>{decision.downgrade}</p></div>
+      </div>
+    </div>
+
+    <p className={styles.note}>简单读法：先看“聪明钱有没有继续买”，再看“KOL 有没有接力”。资金传播强度越高，说明这些买入越容易互相带动；但太高也可能意味着已经过热。未来1小时接力概率由 Hawkes 条件期望事件数近似换算为 1-e^-λ，仅用于比较传播延续性，不等同于价格上涨概率。该模块暂不计入 Alpha Score。</p>
   </section>;
 }
