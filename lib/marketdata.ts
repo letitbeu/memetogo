@@ -68,6 +68,28 @@ export async function fetchPublicTokenMarket(chain: Chain, address: string): Pro
   };
 }
 
+function normalizeOhlcvRows(rows: any[]): KlineCandle[] {
+  const deduped = new Map<number, KlineCandle>();
+  for (const item of rows) {
+    const row = arr(item);
+    const time = num(row[0]);
+    const open = num(row[1]);
+    const rawHigh = num(row[2]);
+    const rawLow = num(row[3]);
+    const close = num(row[4]);
+    const volume = Math.max(0, num(row[5]));
+    if (![time, open, rawHigh, rawLow, close].every(Number.isFinite)) continue;
+    if (time <= 0 || open <= 0 || rawHigh <= 0 || rawLow <= 0 || close <= 0) continue;
+
+    // Some public pools occasionally return malformed wick ordering. Preserve the print,
+    // but enforce valid OHLC geometry so one bad row cannot break the SVG scale.
+    const high = Math.max(rawHigh, open, close);
+    const low = Math.min(rawLow, open, close);
+    deduped.set(time, { time, open, high, low, close, volume });
+  }
+  return [...deduped.values()].sort((a, b) => a.time - b.time).slice(-288);
+}
+
 export async function fetchPublicKline(chain: Chain, address: string, pairAddress: string): Promise<KlineCandle[]> {
   if (!pairAddress) return [];
   const url = new URL(`https://api.geckoterminal.com/api/v2/networks/${GT_NETWORK[chain]}/pools/${encodeURIComponent(pairAddress)}/ohlcv/minute`);
@@ -83,17 +105,5 @@ export async function fetchPublicKline(chain: Chain, address: string, pairAddres
   if (!response.ok) throw new Error(`GeckoTerminal HTTP ${response.status}`);
   const payload = obj(await response.json());
   const rows = arr(obj(obj(payload.data).attributes).ohlcv_list);
-  return rows.map(item => {
-    const row = arr(item);
-    return {
-      time: num(row[0]),
-      open: num(row[1]),
-      high: num(row[2]),
-      low: num(row[3]),
-      close: num(row[4]),
-      volume: num(row[5]),
-    };
-  }).filter(candle => candle.time && candle.open && candle.high && candle.low && candle.close)
-    .sort((a, b) => a.time - b.time)
-    .slice(-288);
+  return normalizeOhlcvRows(rows);
 }
