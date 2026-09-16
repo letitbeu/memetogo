@@ -59,6 +59,7 @@ export default function ContractExplorer({ onAnalyzed }: { onAnalyzed: (project:
         <option value="sol">SOL</option>
         <option value="bsc">BSC</option>
         <option value="robinhood">ROBINHOOD</option>
+        <option value="arc">ARC</option>
       </select>
       <input
         className={styles.input}
