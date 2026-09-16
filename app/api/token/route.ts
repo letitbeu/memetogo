@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MIN_MARKET_CAP, SIGNAL_CHAINS } from "@/lib/gmgn";
-import { fetchIndependentSnapshot, fetchIndependentTokenInfo, fetchIndependentTopTraders, tokenContext } from "@/lib/gmgn_independent";
+import { fetchIndependentKline, fetchIndependentSnapshot, fetchIndependentTokenInfo, fetchIndependentTopTraders, tokenContext } from "@/lib/gmgn_independent";
 import { researchCulture } from "@/lib/culture";
 import { fetchPublicKline, fetchPublicTokenMarket } from "@/lib/marketdata";
 import { evaluateP0Plus } from "@/lib/wealth";
@@ -19,7 +19,7 @@ const detailInFlight = new Map<string, Promise<DetailPayload>>();
 
 function validAddress(chain: Chain, address: string) {
   if (chain === "sol") return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-  if (chain === "bsc") return /^0x[a-fA-F0-9]{40}$/.test(address);
+  if (chain === "bsc" || chain === "arc") return /^0x[a-fA-F0-9]{40}$/.test(address);
   return address.length >= 8 && address.length <= 128 && !/[\s/?#]/.test(address);
 }
 
@@ -53,18 +53,21 @@ async function buildDetail(chain: Chain, address: string): Promise<DetailPayload
 
   const chainDiagnostic = snapshot.diagnostics.find(row => row.chain === chain);
   if (chainDiagnostic?.errors.length) diagnostics.push(...chainDiagnostic.errors.map(error => `GMGN ${error}`));
+  if (chainDiagnostic?.identityWarnings.length) diagnostics.push(...chainDiagnostic.identityWarnings.map(error => `GMGN ${error}`));
 
   const [gmgnInfo, market] = await Promise.all([
-    rank
-      ? Promise.resolve(null)
-      : fetchIndependentTokenInfo(chain, address).catch(error => {
+    (chain === "arc" || !rank)
+      ? fetchIndependentTokenInfo(chain, address).catch(error => {
           diagnostics.push(`GMGN Token Info: ${error instanceof Error ? error.message : String(error)}`);
           return null;
+        })
+      : Promise.resolve(null),
+    chain === "arc"
+      ? Promise.resolve(null)
+      : fetchPublicTokenMarket(chain, address).catch(error => {
+          diagnostics.push(`DEX Screener: ${error instanceof Error ? error.message : String(error)}`);
+          return null;
         }),
-    fetchPublicTokenMarket(chain, address).catch(error => {
-      diagnostics.push(`DEX Screener: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    }),
   ]);
 
   const info = {
@@ -94,21 +97,24 @@ async function buildDetail(chain: Chain, address: string): Promise<DetailPayload
     volume24h: market?.volume24h || 0,
   };
 
-  const candlesPromise: Promise<KlineCandle[]> = market?.pairAddress
-    ? fetchPublicKline(chain, address, market.pairAddress).catch(error => {
-        diagnostics.push(`GeckoTerminal K线: ${error instanceof Error ? error.message : String(error)}`);
+  const candlesPromise: Promise<KlineCandle[]> = chain === "arc"
+    ? fetchIndependentKline(chain, address, "5m", 24).catch(error => {
+        diagnostics.push(`GMGN K线: ${error instanceof Error ? error.message : String(error)}`);
         return [];
       })
-    : Promise.resolve([]);
-  if (!market?.pairAddress) diagnostics.push("未找到可用于K线的主交易池");
+    : market?.pairAddress
+      ? fetchPublicKline(chain, address, market.pairAddress).catch(error => {
+          diagnostics.push(`GeckoTerminal K线: ${error instanceof Error ? error.message : String(error)}`);
+          return [];
+        })
+      : Promise.resolve([]);
+  if (chain !== "arc" && !market?.pairAddress) diagnostics.push("未找到可用于K线的主交易池");
 
   const tradersPromise: Promise<Trader[]> = fetchIndependentTopTraders(chain, address).catch(error => {
     diagnostics.push(`GMGN Top Traders: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   });
 
-  // Culture research is independent from Kline/Top Traders once token metadata is known.
-  // Running these in parallel cuts detail latency and prevents rapid switching from stacking serial work.
   const [candles, traders, culture] = await Promise.all([
     candlesPromise,
     tradersPromise,
@@ -216,9 +222,9 @@ async function buildDetail(chain: Chain, address: string): Promise<DetailPayload
     culture,
     dataSource: {
       identityFlow: "GMGN via MemeToGo independent collector",
-      tokenInfo: rank ? "GMGN 5m rank snapshot" : "GMGN token info via MemeToGo key, 5m cached",
-      market: "DEX Screener",
-      kline: "GeckoTerminal 5m OHLCV",
+      tokenInfo: chain === "arc" ? "GMGN Arc token info" : rank ? "GMGN 5m rank snapshot" : "GMGN token info via MemeToGo key, 5m cached",
+      market: chain === "arc" ? "GMGN Arc rank/token info" : "DEX Screener",
+      kline: chain === "arc" ? "GMGN Arc 5m OHLCV" : "GeckoTerminal 5m OHLCV",
       topTraders: "GMGN via MemeToGo key, 5m cached",
       minMarketCap: MIN_MARKET_CAP,
     },
