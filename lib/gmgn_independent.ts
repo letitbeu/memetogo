@@ -84,6 +84,15 @@ async function collectFresh(): Promise<IndependentSnapshot> {
     await pause(700);
   }
 
+  const rankSuccessCount = diagnostics.filter(row => row.rankCount > 0 && !row.errors.some(error => error.startsWith("Rank:"))).length;
+  if (rankSuccessCount === 0) {
+    const detail = diagnostics
+      .flatMap(row => row.errors.map(error => `${row.chain}:${error}`))
+      .slice(0, 4)
+      .join(" | ");
+    throw new Error(`GMGN 行情Rank全部采集失败${detail ? `：${detail}` : ""}`);
+  }
+
   return {
     capturedAt: new Date().toISOString(),
     signals,
