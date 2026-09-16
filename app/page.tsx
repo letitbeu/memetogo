@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AlphaProject } from "@/lib/types";
+import type { AlphaProject, RankToken } from "@/lib/types";
 import ContractExplorer from "./contract-explorer";
 import HawkesPanel from "./hawkes-panel";
 import CandleChart from "./candle-chart";
@@ -10,10 +10,13 @@ import { enrichProjectsWithIdentityHistory, loadIdentityHistory, mergeIdentityHi
 const STORE_KEY = "memetogo:rolling-feed:v2";
 const MAX_HISTORY = 120;
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const MIN_MARKET_CAP = 1_000_000;
 
 type FeedResponse = {
   generatedAt: string;
+  source?: { collectorCapturedAt?: string };
   projects: AlphaProject[];
+  marketStates?: RankToken[];
   identityEvents?: IdentityHistoryEvent[];
   diagnostics?: Array<{ chain: string; errors: string[] }>;
   error?: string;
@@ -27,16 +30,50 @@ const ago = (epoch: number) => {
   return s < 60 ? `${Math.floor(s)}秒前` : s < 3600 ? `${Math.floor(s / 60)}分钟前` : `${Math.floor(s / 3600)}小时前`;
 };
 const short = (s: string) => s.length > 16 ? `${s.slice(0, 7)}…${s.slice(-5)}` : s;
+const marketKey = (row: Pick<RankToken, "chain" | "address">) => `${row.chain}:${row.address.toLowerCase()}`;
 
-function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[]) {
-  const map = new Map<string, AlphaProject>();
-  for (const row of [...incoming, ...previous]) {
-    const old = map.get(row.key);
-    if (!old || row.latestSignalEpoch > old.latestSignalEpoch || row.score > old.score) map.set(row.key, row);
-  }
+function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[], marketStates?: RankToken[]) {
   const cutoff = Date.now() - MAX_AGE_MS;
-  return [...map.values()]
-    .filter(row => row.latestSignalEpoch * 1000 >= cutoff)
+
+  // Before the first live response arrives we can still hydrate local history. Once a live
+  // Rank snapshot is available, it becomes authoritative for all market fields and the $1M gate.
+  if (!marketStates) {
+    const map = new Map(previous.map(row => [row.key, row]));
+    for (const row of incoming) map.set(row.key, row);
+    return [...map.values()]
+      .filter(row => row.latestSignalEpoch * 1000 >= cutoff)
+      .sort((a, b) => b.score - a.score || b.latestSignalEpoch - a.latestSignalEpoch)
+      .slice(0, MAX_HISTORY);
+  }
+
+  const liveMap = new Map(marketStates.map(row => [marketKey(row), row]));
+  const previousMap = new Map(previous.map(row => [row.key, row]));
+  const incomingMap = new Map(incoming.map(row => [row.key, row]));
+  const keys = new Set([...previousMap.keys(), ...incomingMap.keys()]);
+  const rows: AlphaProject[] = [];
+
+  for (const key of keys) {
+    const fresh = incomingMap.get(key);
+    const prior = previousMap.get(key);
+    const base = fresh || prior;
+    if (!base || base.latestSignalEpoch * 1000 < cutoff) continue;
+
+    const live = liveMap.get(key);
+    if (live) {
+      // Current market state always wins over the rolling historical snapshot.
+      // If the token has fallen below the CURRENT $1M gate, remove it immediately.
+      if (live.marketCap < MIN_MARKET_CAP) continue;
+      rows.push({ ...base, ...live, key: base.key });
+      continue;
+    }
+
+    // A newly detected project may not yet be present in Rank. Keep it only when the
+    // current server-side Alpha build has just validated the gate. Historical rows with
+    // no current market verification are not allowed to linger with stale prices.
+    if (fresh && fresh.marketCap >= MIN_MARKET_CAP) rows.push(fresh);
+  }
+
+  return rows
     .sort((a, b) => b.score - a.score || b.latestSignalEpoch - a.latestSignalEpoch)
     .slice(0, MAX_HISTORY);
 }
@@ -55,7 +92,7 @@ function ProjectRow({ project, selected, onClick }: { project: AlphaProject; sel
       <div className="thesis-line">{project.thesis.slice(0, 3).join(" · ") || "身份资金信号已通过硬门槛"}</div>
       {!!project.risks.length && <div className="risk-line">⚠ {project.risks.join(" · ")}</div>}
     </div>
-    <div className="row-time">{ago(project.latestSignalEpoch)}<span>›</span></div>
+    <div className="row-time">资金信号 {ago(project.latestSignalEpoch)}<span>›</span></div>
   </button>;
 }
 
@@ -127,11 +164,11 @@ export default function Home() {
       const history = mergeIdentityHistory(loadIdentityHistory(), data.identityEvents || []);
       const incoming = enrichProjectsWithIdentityHistory(data.projects || [], history);
       setProjects(prev => {
-        const merged = enrichProjectsWithIdentityHistory(mergeRolling(prev, incoming), history);
+        const merged = enrichProjectsWithIdentityHistory(mergeRolling(prev, incoming, data.marketStates || []), history);
         localStorage.setItem(STORE_KEY, JSON.stringify(merged));
         return merged;
       });
-      setLastAt(data.generatedAt);
+      setLastAt(data.source?.collectorCapturedAt || data.generatedAt);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -166,7 +203,7 @@ export default function Home() {
 
   return <main>
     <header className="topbar"><div><div className="brand"><span className="brand-mark">M</span><strong>MemeToGo</strong><em>Alpha Radar</em></div><p>Smart Money / KOL First · 先看谁在买，再看价格为什么动</p><p><b>筛选机制：</b>GMGN 实时捕捉 Smart Money / KOL 的真实 BUY，身份资金事件可在低市值阶段先记录；只有项目当前市值 ≥ $1M 才允许上榜，无 Smart Money/KOL 买入直接淘汰。通过硬门槛后，再按身份资金强度 → P0 强度 → 5分钟成交/流动性等市场微结构 → 风险惩罚计算 Alpha Score 并排序。<br /><b>P0：</b>确认行情与资金强度，重点观察聪明钱共振、爆量/买压、市值关键突破及大额或多钱包买入。 <b>P0+：</b>进一步确认高质量获利钱包是否形成财富效应，综合 Top Trader 的利润、ROI 与多钱包共振判断。</p></div><div className="live"><span className="live-dot" /><div><b>LIVE</b><small>{lastAt ? new Date(lastAt).toLocaleTimeString("zh-CN", { hour12: false }) : "连接中"}</small></div></div></header>
-    <div className="gatebar"><span>硬门槛</span><b>市值 ≥ $1M</b><b>必须 Smart Money 或 KOL 买入</b><b>15秒刷新</b><span className="gate-note">无身份资金买入 = 不上榜</span></div>
+    <div className="gatebar"><span>硬门槛</span><b>市值 ≥ $1M</b><b>必须 Smart Money 或 KOL 买入</b><b>页面15秒刷新 · 底层行情约120秒更新</b><span className="gate-note">跌破 $1M = 立即移出主榜</span></div>
     <div className="dashboard"><section className="feed"><div className="feed-head"><div><div className="eyebrow">ROLLING ALPHA FEED</div><h1>链上 Alpha 项目流</h1></div><div className="mini-stats"><div><b>{projects.length}</b><span>12H项目</span></div><div><b>{stats.a}</b><span>A+</span></div><div><b>{stats.both}</b><span>双共振</span></div><div><b>{stats.p0}</b><span>P0</span></div></div></div>
       <ContractExplorer onAnalyzed={(project, detail) => { const enriched = enrichProjectsWithIdentityHistory([project], loadIdentityHistory())[0] || project; setExplorerProject(enriched); setExplorerDetail(detail); setSelected(enriched.key); }} />
       <div className="filters"><div>{["all", "sol", "bsc", "robinhood", "arc"].map(v => <button key={v} className={chain === v ? "active" : ""} onClick={() => setChain(v)}>{v === "all" ? "全部链" : v.toUpperCase()}</button>)}</div><div>{[["all", "全部身份"], ["both", "SM+KOL"], ["smart", "聪明钱"], ["kol", "KOL"]].map(([v, l]) => <button key={v} className={identity === v ? "active" : ""} onClick={() => setIdentity(v)}>{l}</button>)}</div></div>
