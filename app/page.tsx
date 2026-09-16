@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AlphaProject, RankToken } from "@/lib/types";
+import type { AlphaProject, Chain, RankToken } from "@/lib/types";
 import ContractExplorer from "./contract-explorer";
 import HawkesPanel from "./hawkes-panel";
 import CandleChart from "./candle-chart";
@@ -17,6 +17,7 @@ type FeedResponse = {
   source?: { collectorCapturedAt?: string };
   projects: AlphaProject[];
   marketStates?: RankToken[];
+  verifiedMarketChains?: Chain[];
   identityEvents?: IdentityHistoryEvent[];
   diagnostics?: Array<{ chain: string; errors: string[] }>;
   error?: string;
@@ -32,14 +33,12 @@ const ago = (epoch: number) => {
 const short = (s: string) => s.length > 16 ? `${s.slice(0, 7)}…${s.slice(-5)}` : s;
 const marketKey = (row: Pick<RankToken, "chain" | "address">) => `${row.chain}:${row.address.toLowerCase()}`;
 
-function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[], marketStates?: RankToken[]) {
+function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[], marketStates?: RankToken[], verifiedMarketChains?: Chain[], capturedAt?: string) {
   const cutoff = Date.now() - MAX_AGE_MS;
 
-  // Before the first live response arrives we can still hydrate local history. Once a live
-  // Rank snapshot is available, it becomes authoritative for all market fields and the $1M gate.
-  if (!marketStates) {
-    const map = new Map(previous.map(row => [row.key, row]));
-    for (const row of incoming) map.set(row.key, row);
+  if (!marketStates || !verifiedMarketChains) {
+    const map = new Map(previous.map(row => [row.key, { ...row, marketDataStale: true }]));
+    for (const row of incoming) map.set(row.key, { ...row, marketDataStale: true });
     return [...map.values()]
       .filter(row => row.latestSignalEpoch * 1000 >= cutoff)
       .sort((a, b) => b.score - a.score || b.latestSignalEpoch - a.latestSignalEpoch)
@@ -47,6 +46,7 @@ function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[], market
   }
 
   const liveMap = new Map(marketStates.map(row => [marketKey(row), row]));
+  const verified = new Set<Chain>(verifiedMarketChains);
   const previousMap = new Map(previous.map(row => [row.key, row]));
   const incomingMap = new Map(incoming.map(row => [row.key, row]));
   const keys = new Set([...previousMap.keys(), ...incomingMap.keys()]);
@@ -58,19 +58,20 @@ function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[], market
     const base = fresh || prior;
     if (!base || base.latestSignalEpoch * 1000 < cutoff) continue;
 
-    const live = liveMap.get(key);
-    if (live) {
-      // Current market state always wins over the rolling historical snapshot.
-      // If the token has fallen below the CURRENT $1M gate, remove it immediately.
-      if (live.marketCap < MIN_MARKET_CAP) continue;
-      rows.push({ ...base, ...live, key: base.key });
+    if (!verified.has(base.chain)) {
+      rows.push({ ...base, marketDataStale: true });
       continue;
     }
 
-    // A newly detected project may not yet be present in Rank. Keep it only when the
-    // current server-side Alpha build has just validated the gate. Historical rows with
-    // no current market verification are not allowed to linger with stale prices.
-    if (fresh && fresh.marketCap >= MIN_MARKET_CAP) rows.push(fresh);
+    const live = liveMap.get(key);
+    if (!live) {
+      // The chain is healthy but this token is no longer in the current Rank snapshot.
+      // Do not keep an unverifiable historical market value in the live Alpha list.
+      continue;
+    }
+
+    if (live.marketCap < MIN_MARKET_CAP) continue;
+    rows.push({ ...base, ...live, key: base.key, marketDataStale: false, marketDataAsOf: capturedAt });
   }
 
   return rows
@@ -83,12 +84,13 @@ function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: str
 }
 
 function ProjectRow({ project, selected, onClick }: { project: AlphaProject; selected: boolean; onClick: () => void }) {
+  const stale = Boolean(project.marketDataStale);
   return <button className={`project-row ${selected ? "selected" : ""}`} onClick={onClick}>
     <div className="rank-score"><strong>{project.score}</strong><span>{project.grade}</span></div>
     <div className="project-main">
-      <div className="project-title"><strong>{project.symbol}</strong><span>{project.name}</span><Badge>{project.chain.toUpperCase()}</Badge>{project.legacyP0 && <Badge tone="hot">P0</Badge>}</div>
-      <div className="identity-flow"><Badge tone="smart">🧠 近期SM买入 {project.smartBuySignals}笔</Badge><Badge tone="kol">📣 近期KOL买入 {project.kolBuySignals}笔</Badge>{project.smartCount > 0 && <span>当前SM持仓 {project.smartCount}钱包</span>}{project.kolCount > 0 && <span>当前KOL持仓 {project.kolCount}钱包</span>}</div>
-      <div className="metrics"><span>市值 <b>{money(project.marketCap)}</b></span><span>流动性 <b>{money(project.liquidity)}</b></span><span>5m成交 <b>{money(project.volume5m)}</b></span><span className={project.change5m >= 0 ? "positive" : "negative"}>5m {pct(project.change5m)}</span><span>#{project.rank}</span></div>
+      <div className="project-title"><strong>{project.symbol}</strong><span>{project.name}</span><Badge>{project.chain.toUpperCase()}</Badge>{project.legacyP0 && <Badge tone="hot">P0</Badge>}{stale && <Badge tone="danger">行情延迟</Badge>}</div>
+      <div className="identity-flow"><Badge tone="smart">🧠 近期SM买入 {project.smartBuySignals}笔</Badge><Badge tone="kol">📣 近期KOL买入 {project.kolBuySignals}笔</Badge>{!stale && project.smartCount > 0 && <span>当前SM持仓 {project.smartCount}钱包</span>}{!stale && project.kolCount > 0 && <span>当前KOL持仓 {project.kolCount}钱包</span>}{stale && <span>当前持仓/行情等待最新Rank</span>}</div>
+      <div className="metrics">{stale ? <><span>市值 <b>数据延迟</b></span><span>流动性 <b>—</b></span><span>5m成交 <b>—</b></span><span>5m —</span></> : <><span>市值 <b>{money(project.marketCap)}</b></span><span>流动性 <b>{money(project.liquidity)}</b></span><span>5m成交 <b>{money(project.volume5m)}</b></span><span className={project.change5m >= 0 ? "positive" : "negative"}>5m {pct(project.change5m)}</span><span>#{project.rank}</span></>}</div>
       <div className="thesis-line">{project.thesis.slice(0, 3).join(" · ") || "身份资金信号已通过硬门槛"}</div>
       {!!project.risks.length && <div className="risk-line">⚠ {project.risks.join(" · ")}</div>}
     </div>
@@ -124,14 +126,15 @@ function DetailPanel({ project, seedDetail = null, explorer = false }: { project
   const holdingCovered = !explorer || Boolean(detail?.rank);
 
   return <aside className="detail">
-    <div className="detail-head"><div><div className="eyebrow">{explorer ? "DIRECT ANALYSIS" : "ALPHA DETAIL"}</div><h2>{project.symbol} <small>{project.name}</small></h2><div className="detail-badges"><Badge tone="smart">🧠 SM买入 {project.smartBuySignals}笔</Badge><Badge tone="kol">📣 KOL买入 {project.kolBuySignals}笔</Badge>{explorer && (detail?.gate?.eligible ? <Badge tone="smart">Gate PASS</Badge> : <Badge tone="danger">未通过 Gate</Badge>)}{project.legacyP0 && <Badge tone="hot">P0命中</Badge>}{detail?.p0Plus?.confirmed && <Badge tone="gold">P0+财富效应</Badge>}</div></div><div className="detail-score">{explorer ? <><strong>CA</strong><span>DIRECT</span></> : <><strong>{project.score}</strong><span>{project.grade}</span></>}</div></div>
+    <div className="detail-head"><div><div className="eyebrow">{explorer ? "DIRECT ANALYSIS" : "ALPHA DETAIL"}</div><h2>{project.symbol} <small>{project.name}</small></h2><div className="detail-badges"><Badge tone="smart">🧠 SM买入 {project.smartBuySignals}笔</Badge><Badge tone="kol">📣 KOL买入 {project.kolBuySignals}笔</Badge>{project.marketDataStale && <Badge tone="danger">行情数据延迟</Badge>}{explorer && (detail?.gate?.eligible ? <Badge tone="smart">Gate PASS</Badge> : <Badge tone="danger">未通过 Gate</Badge>)}{project.legacyP0 && <Badge tone="hot">P0命中</Badge>}{detail?.p0Plus?.confirmed && <Badge tone="gold">P0+财富效应</Badge>}</div></div><div className="detail-score">{explorer ? <><strong>CA</strong><span>DIRECT</span></> : <><strong>{project.score}</strong><span>{project.grade}</span></>}</div></div>
     <div className="contract">{project.chain.toUpperCase()} · <code>{short(project.address)}</code> · <a href={`https://gmgn.ai/${project.chain}/token/${project.address}`} target="_blank" rel="noreferrer">GMGN ↗</a>{explorer && <span> · 主动分析，不自动进入榜单</span>}</div>
+    {project.marketDataStale && <div className="feed-error">当前链的 GMGN Rank 暂未成功刷新，页面不再展示旧市值冒充当前值；待下一次成功采集后自动恢复并重新执行 $1M 门槛。</div>}
     {explorer && detail?.gate && <div className={detail.gate.eligible ? "loading" : "feed-error"}>{detail.gate.eligible ? "当前满足 $1M + Smart Money/KOL BUY 榜单硬门槛。" : `${detail.gate.marketCapEligible ? "市值门槛通过" : "市值未达 $1M"}；${detail.gate.identityEligible ? "已捕捉身份资金BUY" : "当前采集窗口未捕捉Smart Money/KOL BUY"}。`}</div>}
     {loading && <div className="loading">正在拉取K线、Top Traders 与文化研究…</div>}{error && <div className="error">{error}</div>}
 
     <section><div className="section-title"><h3>Meme K线</h3><span>24小时 · 5分钟 · 稳健缩放</span></div><CandleChart candles={detail?.candles || []} /></section>
 
-    <section><div className="section-title"><h3>Why Now</h3><span>资金优先</span></div><div className="why-grid"><div className="why-card smart"><b>近期SM买入</b><strong>{project.smartBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card kol"><b>近期KOL买入</b><strong>{project.kolBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card"><b>当前SM持仓</b><strong>{holdingCovered ? `${project.smartCount}钱包` : "未覆盖"}</strong><span>{holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div><div className="why-card"><b>当前KOL持仓</b><strong>{holdingCovered ? `${project.kolCount}钱包` : "未覆盖"}</strong><span>{holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div></div><p className="muted">口径：买入笔数 = MemeToGo 当前身份资金采集窗口中的 GMGN BUY 交易记录；持仓钱包数来自当前 GMGN Rank 快照。主动查询项目若不在 Rank 中，会显示“未覆盖”，不能解释为 0 钱包。</p><ul className="compact-list">{project.thesis.map((x, i) => <li key={i}>{x}</li>)}</ul></section>
+    <section><div className="section-title"><h3>Why Now</h3><span>资金优先</span></div><div className="why-grid"><div className="why-card smart"><b>近期SM买入</b><strong>{project.smartBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card kol"><b>近期KOL买入</b><strong>{project.kolBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card"><b>当前SM持仓</b><strong>{project.marketDataStale ? "数据延迟" : holdingCovered ? `${project.smartCount}钱包` : "未覆盖"}</strong><span>{project.marketDataStale ? "等待最新Rank" : holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div><div className="why-card"><b>当前KOL持仓</b><strong>{project.marketDataStale ? "数据延迟" : holdingCovered ? `${project.kolCount}钱包` : "未覆盖"}</strong><span>{project.marketDataStale ? "等待最新Rank" : holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div></div><p className="muted">口径：买入笔数 = MemeToGo 当前身份资金采集窗口中的 GMGN BUY 交易记录；持仓钱包数来自当前 GMGN Rank 快照。主动查询项目若不在 Rank 中，会显示“未覆盖”，不能解释为 0 钱包。</p><ul className="compact-list">{project.thesis.map((x, i) => <li key={i}>{x}</li>)}</ul></section>
 
     <HawkesPanel project={project} />
 
@@ -151,6 +154,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [lastAt, setLastAt] = useState("");
+  const [marketHealthy, setMarketHealthy] = useState(true);
   const [chain, setChain] = useState("all");
   const [identity, setIdentity] = useState("all");
   const [explorerProject, setExplorerProject] = useState<AlphaProject | null>(null);
@@ -163,14 +167,18 @@ export default function Home() {
       if (!r.ok) throw new Error(data.error || "Feed加载失败");
       const history = mergeIdentityHistory(loadIdentityHistory(), data.identityEvents || []);
       const incoming = enrichProjectsWithIdentityHistory(data.projects || [], history);
+      const verifiedChains = data.verifiedMarketChains || [];
+      const capturedAt = data.source?.collectorCapturedAt;
       setProjects(prev => {
-        const merged = enrichProjectsWithIdentityHistory(mergeRolling(prev, incoming, data.marketStates || []), history);
+        const merged = enrichProjectsWithIdentityHistory(mergeRolling(prev, incoming, data.marketStates || [], verifiedChains, capturedAt), history);
         localStorage.setItem(STORE_KEY, JSON.stringify(merged));
         return merged;
       });
-      setLastAt(data.source?.collectorCapturedAt || data.generatedAt);
+      setMarketHealthy(verifiedChains.length > 0);
+      if (verifiedChains.length > 0) setLastAt(capturedAt || data.generatedAt);
       setError("");
     } catch (e) {
+      setMarketHealthy(false);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
@@ -202,8 +210,8 @@ export default function Home() {
   }), [projects]);
 
   return <main>
-    <header className="topbar"><div><div className="brand"><span className="brand-mark">M</span><strong>MemeToGo</strong><em>Alpha Radar</em></div><p>Smart Money / KOL First · 先看谁在买，再看价格为什么动</p><p><b>筛选机制：</b>GMGN 实时捕捉 Smart Money / KOL 的真实 BUY，身份资金事件可在低市值阶段先记录；只有项目当前市值 ≥ $1M 才允许上榜，无 Smart Money/KOL 买入直接淘汰。通过硬门槛后，再按身份资金强度 → P0 强度 → 5分钟成交/流动性等市场微结构 → 风险惩罚计算 Alpha Score 并排序。<br /><b>P0：</b>确认行情与资金强度，重点观察聪明钱共振、爆量/买压、市值关键突破及大额或多钱包买入。 <b>P0+：</b>进一步确认高质量获利钱包是否形成财富效应，综合 Top Trader 的利润、ROI 与多钱包共振判断。</p></div><div className="live"><span className="live-dot" /><div><b>LIVE</b><small>{lastAt ? new Date(lastAt).toLocaleTimeString("zh-CN", { hour12: false }) : "连接中"}</small></div></div></header>
-    <div className="gatebar"><span>硬门槛</span><b>市值 ≥ $1M</b><b>必须 Smart Money 或 KOL 买入</b><b>页面15秒刷新 · 底层行情约120秒更新</b><span className="gate-note">跌破 $1M = 立即移出主榜</span></div>
+    <header className="topbar"><div><div className="brand"><span className="brand-mark">M</span><strong>MemeToGo</strong><em>Alpha Radar</em></div><p>Smart Money / KOL First · 先看谁在买，再看价格为什么动</p><p><b>筛选机制：</b>GMGN 实时捕捉 Smart Money / KOL 的真实 BUY，身份资金事件可在低市值阶段先记录；只有项目当前市值 ≥ $1M 才允许上榜，无 Smart Money/KOL 买入直接淘汰。通过硬门槛后，再按身份资金强度 → P0 强度 → 5分钟成交/流动性等市场微结构 → 风险惩罚计算 Alpha Score 并排序。<br /><b>P0：</b>确认行情与资金强度，重点观察聪明钱共振、爆量/买压、市值关键突破及大额或多钱包买入。 <b>P0+：</b>进一步确认高质量获利钱包是否形成财富效应，综合 Top Trader 的利润、ROI 与多钱包共振判断。</p></div><div className="live"><span className="live-dot" /><div><b>{marketHealthy ? "LIVE" : "DELAY"}</b><small>{marketHealthy && lastAt ? new Date(lastAt).toLocaleTimeString("zh-CN", { hour12: false }) : "数据源限频"}</small></div></div></header>
+    <div className="gatebar"><span>硬门槛</span><b>市值 ≥ $1M</b><b>必须 Smart Money 或 KOL 买入</b><b>页面15秒刷新 · 底层行情约120秒更新</b><span className="gate-note">跌破 $1M = 最新Rank确认后立即移出主榜</span></div>
     <div className="dashboard"><section className="feed"><div className="feed-head"><div><div className="eyebrow">ROLLING ALPHA FEED</div><h1>链上 Alpha 项目流</h1></div><div className="mini-stats"><div><b>{projects.length}</b><span>12H项目</span></div><div><b>{stats.a}</b><span>A+</span></div><div><b>{stats.both}</b><span>双共振</span></div><div><b>{stats.p0}</b><span>P0</span></div></div></div>
       <ContractExplorer onAnalyzed={(project, detail) => { const enriched = enrichProjectsWithIdentityHistory([project], loadIdentityHistory())[0] || project; setExplorerProject(enriched); setExplorerDetail(detail); setSelected(enriched.key); }} />
       <div className="filters"><div>{["all", "sol", "bsc", "robinhood", "arc"].map(v => <button key={v} className={chain === v ? "active" : ""} onClick={() => setChain(v)}>{v === "all" ? "全部链" : v.toUpperCase()}</button>)}</div><div>{[["all", "全部身份"], ["both", "SM+KOL"], ["smart", "聪明钱"], ["kol", "KOL"]].map(([v, l]) => <button key={v} className={identity === v ? "active" : ""} onClick={() => setIdentity(v)}>{l}</button>)}</div></div>
