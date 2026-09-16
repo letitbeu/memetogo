@@ -24,6 +24,7 @@
 .outlook span{color:#8ed9ff}
 .outlook p{color:#d9e5f0}
 .decision{margin-top:14px;border:1px solid #2a3546;border-radius:12px;background:linear-gradient(180deg,#101722,#0a1018);overflow:hidden}
+.decision_strong{border-color:rgba(91,255,205,.62);background:linear-gradient(180deg,rgba(18,53,45,.88),rgba(8,21,19,.98));box-shadow:0 0 28px rgba(70,226,154,.09),inset 0 1px 0 rgba(134,255,218,.12)}
 .decision_bull{border-color:rgba(70,226,154,.34);box-shadow:inset 0 1px 0 rgba(70,226,154,.04)}
 .decision_warn{border-color:rgba(255,200,87,.32);box-shadow:inset 0 1px 0 rgba(255,200,87,.04)}
 .decision_risk{border-color:rgba(255,104,118,.32);box-shadow:inset 0 1px 0 rgba(255,104,118,.04)}
@@ -32,12 +33,14 @@
 .decisionHead>div:first-child{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .decisionHead span{font-size:9px;color:#8391a4;font-weight:700}
 .decisionHead strong{font-size:18px;color:#eef4fa;letter-spacing:-.3px}
+.decision_strong .decisionHead strong{color:#9bffdc;text-shadow:0 0 18px rgba(70,226,154,.2)}
 .decision_bull .decisionHead strong{color:#72eeb0}
 .decision_warn .decisionHead strong{color:#ffd572}
 .decision_risk .decisionHead strong{color:#ff8f9a}
 .probability{display:flex;align-items:center;gap:8px;white-space:nowrap}
 .probability b{font-size:16px;color:#dce6f1}
 .decisionSummary{margin:0;padding:13px 15px;color:#d3dde8;font-size:11px;line-height:1.75;background:linear-gradient(90deg,rgba(95,201,255,.035),transparent)}
+.decision_strong .decisionSummary{background:linear-gradient(90deg,rgba(70,226,154,.09),transparent)}
 .decisionGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid #202a38}
 .decisionGrid>div{padding:12px 14px;border-right:1px solid #202a38}
 .decisionGrid>div:last-child{border-right:0}
