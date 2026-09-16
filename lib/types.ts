@@ -1,4 +1,4 @@
-export type Chain = "sol" | "bsc" | "robinhood";
+export type Chain = "sol" | "bsc" | "robinhood" | "arc";
 
 export type Signal = {
   id: string;
