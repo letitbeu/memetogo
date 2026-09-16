@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AlphaProject, KlineCandle } from "@/lib/types";
+import type { AlphaProject } from "@/lib/types";
 import ContractExplorer from "./contract-explorer";
 import HawkesPanel from "./hawkes-panel";
+import CandleChart from "./candle-chart";
 import { enrichProjectsWithIdentityHistory, loadIdentityHistory, mergeIdentityHistory, type IdentityHistoryEvent } from "./identity-history";
 
 const STORE_KEY = "memetogo:rolling-feed:v2";
@@ -38,29 +39,6 @@ function mergeRolling(previous: AlphaProject[], incoming: AlphaProject[]) {
     .filter(row => row.latestSignalEpoch * 1000 >= cutoff)
     .sort((a, b) => b.score - a.score || b.latestSignalEpoch - a.latestSignalEpoch)
     .slice(0, MAX_HISTORY);
-}
-
-function CandleChart({ candles }: { candles: KlineCandle[] }) {
-  if (!candles?.length) return <div className="chart-empty">暂无K线数据</div>;
-  const width = 920, height = 300, pad = 22;
-  const min = Math.min(...candles.map(c => c.low));
-  const max = Math.max(...candles.map(c => c.high));
-  const range = Math.max(max - min, max * .001, 1e-12);
-  const x = (i: number) => pad + i * ((width - pad * 2) / Math.max(1, candles.length - 1));
-  const y = (p: number) => height - pad - ((p - min) / range) * (height - pad * 2);
-  const candleWidth = Math.max(1, Math.min(6, (width - pad * 2) / candles.length * .65));
-
-  return <div className="chart-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="24小时5分钟K线">
-    {[.25, .5, .75].map(v => <line key={v} x1={pad} x2={width - pad} y1={height * v} y2={height * v} className="grid-line" />)}
-    {candles.map((c, i) => {
-      const up = c.close >= c.open;
-      const cx = x(i), yo = y(c.open), yc = y(c.close), yh = y(c.high), yl = y(c.low);
-      return <g key={`${c.time}-${i}`} className={up ? "candle-up" : "candle-down"}>
-        <line x1={cx} x2={cx} y1={yh} y2={yl} />
-        <rect x={cx - candleWidth / 2} y={Math.min(yo, yc)} width={candleWidth} height={Math.max(1, Math.abs(yc - yo))} />
-      </g>;
-    })}
-  </svg><div className="chart-labels"><span>24H / 5m</span><span>Low {min.toPrecision(4)} · High {max.toPrecision(4)}</span></div></div>;
 }
 
 function Badge({ children, tone = "neutral" }: { children: ReactNode; tone?: string }) {
@@ -114,7 +92,7 @@ function DetailPanel({ project, seedDetail = null, explorer = false }: { project
     {explorer && detail?.gate && <div className={detail.gate.eligible ? "loading" : "feed-error"}>{detail.gate.eligible ? "当前满足 $1M + Smart Money/KOL BUY 榜单硬门槛。" : `${detail.gate.marketCapEligible ? "市值门槛通过" : "市值未达 $1M"}；${detail.gate.identityEligible ? "已捕捉身份资金BUY" : "当前采集窗口未捕捉Smart Money/KOL BUY"}。`}</div>}
     {loading && <div className="loading">正在拉取K线、Top Traders 与文化研究…</div>}{error && <div className="error">{error}</div>}
 
-    <section><div className="section-title"><h3>Meme K线</h3><span>24小时 · 5分钟</span></div><CandleChart candles={detail?.candles || []} /></section>
+    <section><div className="section-title"><h3>Meme K线</h3><span>24小时 · 5分钟 · 稳健缩放</span></div><CandleChart candles={detail?.candles || []} /></section>
 
     <section><div className="section-title"><h3>Why Now</h3><span>资金优先</span></div><div className="why-grid"><div className="why-card smart"><b>近期SM买入</b><strong>{project.smartBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card kol"><b>近期KOL买入</b><strong>{project.kolBuySignals}笔</strong><span>当前采集窗口BUY样本</span></div><div className="why-card"><b>当前SM持仓</b><strong>{holdingCovered ? `${project.smartCount}钱包` : "未覆盖"}</strong><span>{holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div><div className="why-card"><b>当前KOL持仓</b><strong>{holdingCovered ? `${project.kolCount}钱包` : "未覆盖"}</strong><span>{holdingCovered ? "当前GMGN Rank标记持仓" : "项目不在当前Rank快照"}</span></div></div><p className="muted">口径：买入笔数 = MemeToGo 当前身份资金采集窗口中的 GMGN BUY 交易记录；持仓钱包数来自当前 GMGN Rank 快照。主动查询项目若不在 Rank 中，会显示“未覆盖”，不能解释为 0 钱包。</p><ul className="compact-list">{project.thesis.map((x, i) => <li key={i}>{x}</li>)}</ul></section>
 
